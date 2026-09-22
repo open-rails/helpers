@@ -1,0 +1,4 @@
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{"error":{"type":"authorization_error","code":"2fa_required","message":"Two-factor authentication is required."}}

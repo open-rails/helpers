@@ -1,0 +1,4 @@
+HTTP/1.1 500 Internal Server Error
+Content-Type: application/json; charset=utf-8
+
+{"object":"error","error":{"type":"api","message":"pq: constraint \"galleries_slug_key\" violated"}}

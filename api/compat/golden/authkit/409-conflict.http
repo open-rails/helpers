@@ -1,0 +1,4 @@
+HTTP/1.1 409 Conflict
+Content-Type: application/json
+
+{"error":{"type":"invalid_request_error","code":"2fa_factor_exists","message":"A two-factor authentication method is already enrolled. Remove it before enrolling a replacement."}}

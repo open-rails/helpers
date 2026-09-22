@@ -1,0 +1,4 @@
+HTTP/1.1 502 Bad Gateway
+Content-Type: application/json
+
+{"error":{"type":"api_error","message":"upstream failed"}}

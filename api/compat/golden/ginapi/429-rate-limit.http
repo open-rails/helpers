@@ -1,0 +1,4 @@
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json; charset=utf-8
+
+{"object":"error","error":{"type":"rate_limit","message":"slow down"}}

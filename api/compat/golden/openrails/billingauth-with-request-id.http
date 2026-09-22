@@ -1,0 +1,5 @@
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+X-Request-Id: req_01HZZ
+
+{"error":{"message":"authentication required","type":"authentication_required"},"object":"error"}

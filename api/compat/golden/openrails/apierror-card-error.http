@@ -1,0 +1,4 @@
+HTTP/1.1 402 Payment Required
+Content-Type: application/json
+
+{"error":{"type":"card_error","code":"insufficient_funds","message":"insufficient funds","request_id":"req_01HZY"}}

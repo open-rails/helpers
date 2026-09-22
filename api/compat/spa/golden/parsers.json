@@ -1,0 +1,1920 @@
+{
+  "fixtures": 70,
+  "results": {
+    "apikit-compat-object/400-bad-request": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "amount is required",
+        "localizationKey": "amount is required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "amount is required"
+      }
+    },
+    "apikit-compat-object/404-not-found": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "gallery not found",
+        "localizationKey": "gallery not found",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "gallery not found",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "gallery not found",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "gallery not found"
+      }
+    },
+    "apikit-compat-object/422-moderation-rejected": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "moderation_rejected",
+        "localizationKey": "moderation_rejected",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "the artwork was refused",
+        "type": "invalid_request_error",
+        "code": "moderation_rejected",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "the artwork was refused",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "the artwork was refused"
+      }
+    },
+    "apikit-compat-object/500-internal": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "internal_error",
+        "localizationKey": "internal_error",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "internal error",
+        "type": "api_error",
+        "code": "internal_error",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "internal error",
+        "type": "api_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "internal error"
+      }
+    },
+    "apikit-compat-object/501-not-implemented": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "not_implemented",
+        "localizationKey": "not_implemented",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "video transcoding is not configured",
+        "type": "api_error",
+        "code": "not_implemented",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "video transcoding is not configured",
+        "type": "api_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "video transcoding is not configured"
+      }
+    },
+    "apikit/400-bad-request": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "amount is required",
+        "localizationKey": "amount is required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "message": "amount is required"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/400-with-code": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "missing_param",
+        "localizationKey": "missing_param",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request_error",
+        "code": "missing_param",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "missing_param",
+            "message": "amount is required"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/400-with-param": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "amount is required",
+        "localizationKey": "amount is required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "message": "amount is required",
+            "param": "amount"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/401-unauthorized": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "unauthorized",
+        "localizationKey": "unauthorized",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "unauthorized",
+        "type": "authentication_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "authentication_error",
+            "message": "unauthorized"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/402-card": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "insufficient_funds",
+        "localizationKey": "insufficient_funds",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "card declined",
+        "type": "card_error",
+        "code": "insufficient_funds",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "card_error",
+            "code": "insufficient_funds",
+            "message": "card declined"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/403-forbidden": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "forbidden",
+        "localizationKey": "forbidden",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "forbidden",
+        "type": "authorization_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "authorization_error",
+            "message": "forbidden"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/404-not-found": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "gallery not found",
+        "localizationKey": "gallery not found",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "gallery not found",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "message": "gallery not found"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/409-conflict": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "already exists",
+        "localizationKey": "already exists",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "already exists",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "message": "already exists"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/415-unsupported-media": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "unsupported media type",
+        "localizationKey": "unsupported media type",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "unsupported media type",
+        "type": "invalid_request_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "message": "unsupported media type"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/422-moderation-rejected": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "moderation_rejected",
+        "localizationKey": "moderation_rejected",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "the artwork was refused",
+        "type": "invalid_request_error",
+        "code": "moderation_rejected",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "moderation_rejected",
+            "message": "the artwork was refused"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/429-rate-limit": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "slow down",
+        "localizationKey": "slow down",
+        "metadataSpreadOnto": [
+          "retry_after"
+        ]
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "slow down",
+        "type": "rate_limit_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "rate_limit_error",
+            "message": "slow down",
+            "metadata": {
+              "retry_after": 30
+            }
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/500-internal": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "internal_error",
+        "localizationKey": "internal_error",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "internal error",
+        "type": "api_error",
+        "code": "internal_error",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "code": "internal_error",
+            "message": "internal error"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/501-not-implemented": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "not_implemented",
+        "localizationKey": "not_implemented",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "video transcoding is not configured",
+        "type": "api_error",
+        "code": "not_implemented",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "code": "not_implemented",
+            "message": "video transcoding is not configured"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/502-bad-gateway": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "upstream failed",
+        "localizationKey": "upstream failed",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "upstream failed",
+        "type": "api_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "message": "upstream failed"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/503-unavailable": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "try later",
+        "localizationKey": "try later",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "try later",
+        "type": "api_error",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "message": "try later"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/metadata-scrubbed": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "resource_conflict",
+        "localizationKey": "resource_conflict",
+        "metadataSpreadOnto": [
+          "retry_after"
+        ]
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "conflict",
+        "type": "invalid_request_error",
+        "code": "resource_conflict",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "resource_conflict",
+            "message": "conflict",
+            "metadata": {
+              "retry_after": 5
+            }
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "apikit/with-request-id": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "resource_conflict",
+        "localizationKey": "resource_conflict",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "idempotency key reused",
+        "type": "invalid_request_error",
+        "code": "resource_conflict",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "resource_conflict",
+            "message": "idempotency key reused",
+            "request_id": "req_01HZX"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/400-explicit-param": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "invalid_email",
+        "localizationKey": "invalid_email",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "The email address is invalid.",
+        "type": "invalid_request_error",
+        "code": "invalid_email",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "invalid_email",
+            "message": "The email address is invalid.",
+            "param": "email_address"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/400-invalid-request": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "invalid_email",
+        "localizationKey": "invalid_email",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "The email address is invalid.",
+        "type": "invalid_request_error",
+        "code": "invalid_email",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "invalid_email",
+            "message": "The email address is invalid.",
+            "param": "email"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/401-authentication": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "authentication_required",
+        "localizationKey": "authentication_required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "Authentication is required.",
+        "type": "authentication_error",
+        "code": "authentication_required",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "authentication_error",
+            "code": "authentication_required",
+            "message": "Authentication is required."
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/403-authorization": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "2fa_required",
+        "localizationKey": "2fa_required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "Two-factor authentication is required.",
+        "type": "authorization_error",
+        "code": "2fa_required",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "authorization_error",
+            "code": "2fa_required",
+            "message": "Two-factor authentication is required."
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/404-not-found": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "user_not_found",
+        "localizationKey": "user_not_found",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "User not found.",
+        "type": "invalid_request_error",
+        "code": "user_not_found",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "user_not_found",
+            "message": "User not found."
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/409-conflict": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "2fa_factor_exists",
+        "localizationKey": "2fa_factor_exists",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "A two-factor authentication method is already enrolled. Remove it before enrolling a replacement.",
+        "type": "invalid_request_error",
+        "code": "2fa_factor_exists",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "2fa_factor_exists",
+            "message": "A two-factor authentication method is already enrolled. Remove it before enrolling a replacement."
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/429-rate-limit": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "rate_limited",
+        "localizationKey": "rate_limited",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "Too many requests. Please try again later.",
+        "type": "rate_limit_error",
+        "code": "rate_limited",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "rate_limit_error",
+            "code": "rate_limited",
+            "message": "Too many requests. Please try again later."
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/500-internal": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "internal_error",
+        "localizationKey": "internal_error",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "An internal error occurred. Please try again.",
+        "type": "api_error",
+        "code": "internal_error",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "code": "internal_error",
+            "message": "An internal error occurred. Please try again."
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/500-unknown-error": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "internal_error",
+        "localizationKey": "internal_error",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "An internal error occurred. Please try again.",
+        "type": "api_error",
+        "code": "internal_error",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "code": "internal_error",
+            "message": "An internal error occurred. Please try again."
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/502-upstream": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "application_document_fetch_failed",
+        "localizationKey": "application_document_fetch_failed",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "The application document could not be fetched.",
+        "type": "api_error",
+        "code": "application_document_fetch_failed",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "code": "application_document_fetch_failed",
+            "message": "The application document could not be fetched."
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "authkit/with-metadata": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "rate_limited",
+        "localizationKey": "rate_limited",
+        "metadataSpreadOnto": [
+          "retry_after"
+        ]
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "Too many requests. Please try again later.",
+        "type": "rate_limit_error",
+        "code": "rate_limited",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "rate_limit_error",
+            "code": "rate_limited",
+            "message": "Too many requests. Please try again later.",
+            "metadata": {
+              "retry_after": 30
+            }
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "ginapi/400-bad-request": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "amount is required",
+        "localizationKey": "amount is required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "amount is required"
+      }
+    },
+    "ginapi/400-with-code": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "missing_param",
+        "localizationKey": "missing_param",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request",
+        "code": "missing_param",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "amount is required"
+      }
+    },
+    "ginapi/400-with-param": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "amount is required",
+        "localizationKey": "amount is required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "amount is required"
+      }
+    },
+    "ginapi/401-unauthorized": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "unauthorized",
+        "localizationKey": "unauthorized",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "unauthorized",
+        "type": "authentication",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "unauthorized",
+        "type": "authentication",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "unauthorized"
+      }
+    },
+    "ginapi/403-forbidden": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "forbidden",
+        "localizationKey": "forbidden",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "forbidden",
+        "type": "forbidden",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "forbidden",
+        "type": "forbidden",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "forbidden"
+      }
+    },
+    "ginapi/404-not-found": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "gallery not found",
+        "localizationKey": "gallery not found",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "gallery not found",
+        "type": "not_found",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "gallery not found",
+        "type": "not_found",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "gallery not found"
+      }
+    },
+    "ginapi/409-conflict": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "already exists",
+        "localizationKey": "already exists",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "already exists",
+        "type": "conflict",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "already exists",
+        "type": "conflict",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "already exists"
+      }
+    },
+    "ginapi/415-unsupported-media": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "unsupported media type",
+        "localizationKey": "unsupported media type",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "unsupported media type",
+        "type": "invalid_request",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "unsupported media type",
+        "type": "invalid_request",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "unsupported media type"
+      }
+    },
+    "ginapi/422-unprocessable": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "content rejected by moderation",
+        "localizationKey": "content rejected by moderation",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "content rejected by moderation",
+        "type": "invalid_request",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "content rejected by moderation",
+        "type": "invalid_request",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "content rejected by moderation"
+      }
+    },
+    "ginapi/429-rate-limit": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "slow down",
+        "localizationKey": "slow down",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "slow down",
+        "type": "rate_limit",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "slow down",
+        "type": "rate_limit",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "slow down"
+      }
+    },
+    "ginapi/500-internal": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "pq: constraint \"galleries_slug_key\" violated",
+        "localizationKey": "pq: constraint \"galleries_slug_key\" violated",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "pq: constraint \"galleries_slug_key\" violated",
+        "type": "api",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "pq: constraint \"galleries_slug_key\" violated",
+        "type": "api",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "pq: constraint \"galleries_slug_key\" violated"
+      }
+    },
+    "ginapi/501-not-implemented": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "video transcoding is not configured",
+        "localizationKey": "video transcoding is not configured",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "video transcoding is not configured",
+        "type": "api",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "video transcoding is not configured",
+        "type": "api",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "video transcoding is not configured"
+      }
+    },
+    "ginapi/502-bad-gateway": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "upstream failed",
+        "localizationKey": "upstream failed",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "upstream failed",
+        "type": "api",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "upstream failed",
+        "type": "api",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "upstream failed"
+      }
+    },
+    "ginapi/503-unavailable": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "try later",
+        "localizationKey": "try later",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "try later",
+        "type": "api",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "try later",
+        "type": "api",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "try later"
+      }
+    },
+    "openrails-unreleased/billingauth-no-request-id": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "authentication_required",
+        "localizationKey": "authentication_required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "authentication required",
+        "type": "authentication_error",
+        "code": "authentication_required",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "authentication_error",
+            "code": "authentication_required",
+            "message": "authentication required"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails-unreleased/billingauth-with-request-id": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "authentication_required",
+        "localizationKey": "authentication_required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "authentication required",
+        "type": "authentication_error",
+        "code": "authentication_required",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "authentication_error",
+            "code": "authentication_required",
+            "message": "authentication required",
+            "request_id": "req_01HZZ"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/apierror-card-error": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "insufficient_funds",
+        "localizationKey": "insufficient_funds",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "insufficient funds",
+        "type": "card_error",
+        "code": "insufficient_funds",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "card_error",
+            "code": "insufficient_funds",
+            "message": "insufficient funds",
+            "request_id": "req_01HZY"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/apierror-conflict-helper": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "resource_conflict",
+        "localizationKey": "resource_conflict",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "payment already captured",
+        "type": "invalid_request_error",
+        "code": "resource_conflict",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "resource_conflict",
+            "message": "payment already captured"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/apierror-plain": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "invalid_param",
+        "localizationKey": "invalid_param",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request_error",
+        "code": "invalid_param",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "invalid_param",
+            "message": "amount is required"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/apierror-with-metadata": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "rate_limit_exceeded",
+        "localizationKey": "rate_limit_exceeded",
+        "metadataSpreadOnto": [
+          "retry_after"
+        ]
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "slow down",
+        "type": "rate_limit_error",
+        "code": "rate_limit_exceeded",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "rate_limit_error",
+            "code": "rate_limit_exceeded",
+            "message": "slow down",
+            "metadata": {
+              "retry_after": 30
+            }
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/apierror-with-param": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "invalid_param",
+        "localizationKey": "invalid_param",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "amount is required",
+        "type": "invalid_request_error",
+        "code": "invalid_param",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "invalid_param",
+            "message": "amount is required",
+            "param": "amount"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/apierror-with-request-id": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "idempotency_key_reused",
+        "localizationKey": "idempotency_key_reused",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "idempotency key reused",
+        "type": "invalid_request_error",
+        "code": "idempotency_key_reused",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "idempotency_key_reused",
+            "message": "idempotency key reused",
+            "request_id": "req_01HZX"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/billingauth-no-request-id": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "authentication required",
+        "localizationKey": "authentication required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "authentication required",
+        "type": "authentication_required",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "authentication required",
+        "type": "authentication_required",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "authentication required"
+      }
+    },
+    "openrails/billingauth-with-request-id": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "authentication required",
+        "localizationKey": "authentication required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "authentication required",
+        "type": "authentication_required",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "threw",
+        "userMessage": "authentication required",
+        "type": "authentication_required",
+        "code": null,
+        "branch": "stripe-envelope"
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "authentication required"
+      }
+    },
+    "openrails/simple-400": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "invalid_param",
+        "localizationKey": "invalid_param",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "invalid_request_error",
+        "code": "invalid_param",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "invalid_param",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-401": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "authentication_required",
+        "localizationKey": "authentication_required",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "authentication_error",
+        "code": "authentication_required",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "authentication_error",
+            "code": "authentication_required",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-402": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "payment_failed",
+        "localizationKey": "payment_failed",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "card_error",
+        "code": "payment_failed",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "card_error",
+            "code": "payment_failed",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-403": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "resource_access_denied",
+        "localizationKey": "resource_access_denied",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "authorization_error",
+        "code": "resource_access_denied",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "authorization_error",
+            "code": "resource_access_denied",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-404": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "resource_not_found",
+        "localizationKey": "resource_not_found",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "invalid_request_error",
+        "code": "resource_not_found",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "resource_not_found",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-409": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "resource_conflict",
+        "localizationKey": "resource_conflict",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "invalid_request_error",
+        "code": "resource_conflict",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "resource_conflict",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-415": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "invalid_param",
+        "localizationKey": "invalid_param",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "invalid_request_error",
+        "code": "invalid_param",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "invalid_param",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-422": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "invalid_param",
+        "localizationKey": "invalid_param",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "invalid_request_error",
+        "code": "invalid_param",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "invalid_request_error",
+            "code": "invalid_param",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-429": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "rate_limit_exceeded",
+        "localizationKey": "rate_limit_exceeded",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "rate_limit_error",
+        "code": "rate_limit_exceeded",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "rate_limit_error",
+            "code": "rate_limit_exceeded",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-500": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "internal_error",
+        "localizationKey": "internal_error",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "api_error",
+        "code": "internal_error",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "code": "internal_error",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-501": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "internal_error",
+        "localizationKey": "internal_error",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "api_error",
+        "code": "internal_error",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "code": "internal_error",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-502": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "internal_error",
+        "localizationKey": "internal_error",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "api_error",
+        "code": "internal_error",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "code": "internal_error",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    },
+    "openrails/simple-503": {
+      "doujins/client.ts": {
+        "outcome": "threw",
+        "displayedMessage": "service_unavailable",
+        "localizationKey": "service_unavailable",
+        "metadataSpreadOnto": []
+      },
+      "hentai0/api-service.ts": {
+        "outcome": "threw",
+        "userMessage": "probe message",
+        "type": "api_error",
+        "code": "service_unavailable",
+        "branch": "stripe-envelope"
+      },
+      "hentai0/api-service.ts@200": {
+        "outcome": "resolved",
+        "value": {
+          "error": {
+            "type": "api_error",
+            "code": "service_unavailable",
+            "message": "probe message"
+          }
+        }
+      },
+      "hentai0/useUploadVideo.ts": {
+        "shownToTheUploader": "Upload failed - please try again"
+      }
+    }
+  }
+}

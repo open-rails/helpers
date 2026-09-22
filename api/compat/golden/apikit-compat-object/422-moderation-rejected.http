@@ -1,0 +1,4 @@
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/json
+
+{"object":"error","error":{"type":"invalid_request_error","code":"moderation_rejected","message":"the artwork was refused"}}
