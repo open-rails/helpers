@@ -1,5 +1,5 @@
-// Package river composes library workers into one host-owned River client.
-// It does not migrate a database, own a pool, or start or stop the returned client.
+// Package river initializes River tables explicitly and composes library workers
+// into one host-owned client. It never owns the host pool or starts/stops clients.
 package river
 
 import (
