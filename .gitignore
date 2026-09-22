@@ -1,0 +1,4 @@
+.codegraph/
+.reports/
+coverage.out
+*.test
