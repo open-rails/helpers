@@ -1,0 +1,4 @@
+HTTP/1.1 502 Bad Gateway
+Content-Type: application/json
+
+{"error":{"type":"api_error","code":"application_document_fetch_failed","message":"The application document could not be fetched."}}

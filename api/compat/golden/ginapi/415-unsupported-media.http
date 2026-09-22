@@ -1,0 +1,4 @@
+HTTP/1.1 415 Unsupported Media Type
+Content-Type: application/json; charset=utf-8
+
+{"object":"error","error":{"type":"invalid_request","message":"unsupported media type"}}

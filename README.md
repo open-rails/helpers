@@ -1,13 +1,31 @@
 # helpers
 
-Shared Go helpers for HTTP APIs and composing River jobs.
+Shared Go helpers in one module and one release. MigrateKit remains separate.
 
-One repository, one Go module and one release version. Applications import the independent packages they need:
+| Import | Purpose | Runtime dependencies |
+| --- | --- | --- |
+| `github.com/open-rails/helpers/api` | HTTP errors, responses, safe metadata and pagination | Standard library |
+| `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
+| `github.com/open-rails/helpers/river` | Compose library jobs into one host-owned River client | River and pgx |
 
-- `github.com/open-rails/helpers/apikit`: HTTP errors, responses and pagination.
-- `github.com/open-rails/helpers/apikit/gin`: Gin writers, binding and locale helpers.
-- `github.com/open-rails/helpers/riverkit`: compose library jobs into one host-owned River client.
+Import only the packages an application needs. The API core does not import Gin or River. Go builds the imported packages and their dependencies; all packages share this module's version and Go/toolchain requirements.
 
-APIKit and RiverKit are being consolidated here with their existing behavior and regression evidence. MigrateKit remains a separate library and is outside this repository. No helper package imports its sibling unless required by its purpose; the Gin adapter depends on APIKit, while the API core does not depend on Gin or River.
+## API helpers
 
-The migration is in progress; consumer adoption and the first shared release follow the qualified package import.
+The core provides typed errors, stable type/code fields, optional request IDs, bounded/sanitized metadata, JSON writers and generic list/message/deletion responses. The Gin adapter delegates to those writers and adds pagination binding and locale middleware. It does not add a router or authentication system. Existing response bytes are retained, including omitted codes/discriminators and preserved request IDs.
+
+## River composition
+
+`river.New` combines library contributions, validates registration and binds their producers to the same ordinary River client and actual host pool. The host starts/stops that client and retains ownership of the pool. These helpers do not add a scheduler, migrate tables or own billing logic.
+
+## Validation
+
+Use one entry point locally and in CI:
+
+```sh
+RIVER_TEST_DATABASE_URL='postgres://.../helpers_test?sslmode=disable' bash scripts/check.sh
+```
+
+It checks formatting, the single-module/package boundaries, vet/race tests, actual PostgreSQL River composition, the frozen frontend-parser fixtures and reachable vulnerabilities. For a quick API-only check, run `go test ./api/...`.
+
+`api/compat` contains frozen wire/parser evidence, not reverse dependencies on applications. Historical source-version comparisons and nested module publication tooling are retired. Original copyrights and source provenance are retained.
