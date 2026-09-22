@@ -12,8 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	riverqueue "github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
-	"github.com/riverqueue/river/rivermigrate"
 )
 
 func TestOneFleetPersistsBeforeStartAndPreservesHostPool(t *testing.T) {
@@ -29,11 +27,8 @@ func TestOneFleetPersistsBeforeStartAndPreservesHostPool(t *testing.T) {
 	}
 	defer pool.Close()
 	schema := "riverkit_" + strings.ToLower(rand.Text())
-	if _, err := pool.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
-		t.Fatal(err)
-	}
 	defer func() {
-		if _, err := pool.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE"); err != nil {
+		if _, err := pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE"); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -66,11 +61,7 @@ func TestOneFleetPersistsBeforeStartAndPreservesHostPool(t *testing.T) {
 	if firstProducer != client || secondProducer != client || client.Stopped() != nil {
 		t.Fatal("composition did not return the one unstarted bound client")
 	}
-	migrator, err := rivermigrate.New(riverpgxv5.New(pool), &rivermigrate.Config{Schema: schema})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := migrator.Migrate(ctx, rivermigrate.DirectionUp, nil); err != nil {
+	if err := ApplyMigrations(ctx, pool, schema); err != nil {
 		t.Fatal(err)
 	}
 	events, unsubscribe := client.Subscribe(riverqueue.EventKindJobCompleted)
