@@ -41,6 +41,18 @@ No forwarding packages are provided at the old import paths. Libraries and hosts
 
 The API helpers preserve APIKit's response contract. Replacing older `doujins-org/ginapi` writers can change envelope semantics and requires application-level compatibility checks. See the [error envelope compatibility notes](api/compat/DECISION-object-discriminator.md) and [frozen HTTP/parser fixtures](api/compat/README.md) for the recorded differences.
 
+## Injected-code scan
+
+A reusable workflow scans a repository's tracked tree for the repo-injection worm (invisible padding, decode-and-eval, blockchain dead-drop C2, tampered build configs). Pin it by commit SHA:
+
+```yaml
+jobs:
+  injection-scan:
+    uses: open-rails/helpers/.github/workflows/injection-scan.yml@<helpers commit SHA>
+```
+
+Locally: `scripts/scan-injected-code.sh --root <repo>`. Rules, thresholds and exclusions are in [docs/injection-scan.md](docs/injection-scan.md).
+
 ## Validation
 
 Use one entry point locally and in CI:

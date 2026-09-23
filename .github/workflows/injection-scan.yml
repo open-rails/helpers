@@ -1,0 +1,23 @@
+name: Injected Code Scan
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  injection-scan:
+    name: Injected Code Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: target
+          persist-credentials: false
+      # job.* names this reusable workflow's own commit; github.* names the caller's.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: scanner
+          persist-credentials: false
+      - run: bash scanner/scripts/scan-injected-code.sh --root scanner --self-test
+      - run: bash scanner/scripts/scan-injected-code.sh --root target --all
