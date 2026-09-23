@@ -9,9 +9,9 @@ mapfile -t modules < <(git ls-files --cached --others --exclude-standard -- go.m
 [[ -z "$(git ls-files --cached --others --exclude-standard -- go.work '**/go.work')" ]] || { echo "helpers must resolve without a workspace" >&2; exit 1; }
 [[ -z "$(git ls-files -z '*.go' | xargs -0 gofmt -l)" ]] || { echo "run gofmt on Go source" >&2; exit 1; }
 go mod tidy -diff
-api_deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./api)"
+api_deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./api ./auth)"
 while IFS= read -r dep; do
-  [[ -z "$dep" || "$dep" == github.com/open-rails/helpers/api ]] || { echo "API core imports non-standard package: $dep" >&2; exit 1; }
+  [[ -z "$dep" || "$dep" == github.com/open-rails/helpers/api || "$dep" == github.com/open-rails/helpers/auth ]] || { echo "API/auth core imports non-standard package: $dep" >&2; exit 1; }
 done <<< "$api_deps"
 if go list -m -f '{{.Path}}' all | grep -Eq '^github.com/open-rails/(authkit|openrails|migratekit|apikit|riverkit)($|/)'; then
   echo "helpers must not depend on applications or retired standalone helper modules" >&2
