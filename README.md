@@ -5,6 +5,7 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | Import | Purpose | Runtime dependencies |
 | --- | --- | --- |
 | `github.com/open-rails/helpers/api` | HTTP errors, responses, safe metadata and pagination | Standard library |
+| `github.com/open-rails/helpers/auth` | Request identity and optional scoped permission capability | Standard library |
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
 | `github.com/open-rails/helpers/river` | Initialize River tables and compose one host-owned client | River and pgx |
 
@@ -13,6 +14,10 @@ Import only the packages an application needs. The API core does not import Gin 
 ## API helpers
 
 The core provides typed errors, stable type/code fields, optional request IDs, bounded/sanitized metadata, JSON writers and generic list/message/deletion responses. The Gin adapter delegates to those writers and adds pagination binding and locale middleware. It does not add a router or authentication system. Existing response bytes are retained, including omitted codes/discriminators and preserved request IDs.
+
+## Authentication values
+
+Consumers define their own `AuthenticateRequest(context.Context, *http.Request) (auth.Principal, error)` interface. A provider returns the verified identity for that request; an optional `auth.PermissionChecker` on the principal checks a host-resolved immutable scope and permission without verifying sender proof again. Identity-only providers implement only `Identity() auth.Identity`. Missing permission capability denies privileged access. Account mapping, routes, issuer configuration, verification and authorization policy stay with the provider or host.
 
 ## River composition
 
