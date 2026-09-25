@@ -118,6 +118,7 @@ type Dependency struct {
 	probe        Probe
 	unavailable  func(error) bool
 	probeTimeout time.Duration
+	interval     time.Duration
 	downAfter    int
 	up           atomic.Bool
 	everDown     atomic.Bool
@@ -152,6 +153,11 @@ type DepOption func(*Dependency)
 // ProbeTimeout overrides the per-probe timeout for this dependency.
 func ProbeTimeout(t time.Duration) DepOption { return func(d *Dependency) { d.probeTimeout = t } }
 
+// ProbeInterval overrides the probe period while the dependency is up, for
+// probes that cost something (third-party APIs). Backoff while down is
+// unchanged.
+func ProbeInterval(t time.Duration) DepOption { return func(d *Dependency) { d.interval = t } }
+
 // DownAfter sets how many consecutive failed probes mark it down.
 func DownAfter(n int) DepOption { return func(d *Dependency) { d.downAfter = n } }
 
@@ -168,7 +174,7 @@ func (s *Supervisor) Add(name string, class Class, probe Probe, unavailable func
 		unavailable = IsConnectivity
 	}
 	d := &Dependency{sup: s, name: name, class: class, probe: probe, unavailable: unavailable,
-		probeTimeout: s.timing.Timeout, downAfter: 1,
+		probeTimeout: s.timing.Timeout, interval: s.timing.Interval, downAfter: 1,
 		kick: make(chan struct{}, 1), hookNotify: make(chan struct{}, 1), done: make(chan struct{}), since: time.Now()}
 	if class == Required {
 		d.downAfter = s.timing.RequiredDownAfter
@@ -335,7 +341,7 @@ func (d *Dependency) run(ctx context.Context) {
 		var wait time.Duration
 		switch {
 		case d.up.Load() && err == nil:
-			attempt, wait = 0, t.Interval
+			attempt, wait = 0, d.interval
 		case err == nil:
 			wait = t.BackoffBase
 		default:

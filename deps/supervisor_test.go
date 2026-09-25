@@ -247,3 +247,17 @@ func TestHungHookDoesNotStallProbeLoop(t *testing.T) {
 	close(release)
 	eventually(t, "coalesced hooks delivered", func() bool { return downs.Load() >= 2 && ups.Load() >= 1 })
 }
+
+func TestProbeIntervalSlowsProbesWhileUp(t *testing.T) {
+	sup := New(WithTiming(fastTiming))
+	var fast, slow atomic.Int32
+	sup.Add("fast", Optional, func(context.Context) error { fast.Add(1); return nil }, nil)
+	sup.Add("slow", Optional, func(context.Context) error { slow.Add(1); return nil }, nil, ProbeInterval(time.Hour))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sup.Start(ctx)
+	eventually(t, "fast probed repeatedly", func() bool { return fast.Load() >= 5 })
+	if n := slow.Load(); n != 1 {
+		t.Fatalf("slow dependency probed %d times, want 1", n)
+	}
+}
