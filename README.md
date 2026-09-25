@@ -34,7 +34,7 @@ When importing both the helpers and upstream River, use a descriptive alias such
 
 `deps.NewSwitch(dep, primary, newFallback)` serves the primary while the dependency is up and a local fallback otherwise. `deps.Call`/`deps.Do` retry a call once on the fallback when the primary is unreachable. Fallback state is replaced, never merged, on recovery. Use it only for state whose per-process scope is acceptable (caches, rate-limit windows); state other replicas must see belongs in Postgres.
 
-`deps.NewRedis(RedisConfig)` returns a `redis.UniversalClient` without dialing: one address gives a plain client, `master_name` plus Sentinel addresses a failover client, and several addresses a cluster client. `AddRedis` registers it as optional.
+`deps.NewRedis(RedisConfig)` returns a `redis.UniversalClient` without dialing: `master_name` with `sentinel_addrs` gives a Sentinel failover client (the Sentinel password defaults to `password`), otherwise one of `addrs` gives a plain client and several a cluster client. `AddRedis` registers it as optional; its probe writes a short-lived key, so a primary that refuses writes (`NOREPLICAS`, `READONLY`) is down too.
 
 HTTP: `Gate()` is the application listener's handler and can bind before the application is built. It serves `/livez` (always 200, never checks dependencies) and `/readyz` (200 once `Open(app)` is called, 503 after `Drain()`), and returns 503 for everything else until `Open`. `OpsHandler()` adds `/statusz` (JSON per dependency) and `/metrics` (`app_ready`, `app_dependency_up{dependency,class}`, `app_dependency_transitions_total`, and `Counter`s) for an internal port.
 
@@ -69,7 +69,7 @@ Locally: `scripts/scan-injected-code.sh --root <repo>`. Rules, thresholds and ex
 Use one entry point locally and in CI:
 
 ```sh
-RIVER_TEST_DATABASE_URL='postgres://.../helpers_test?sslmode=disable' DEPS_TEST_REDIS_ADDR=127.0.0.1:6379 bash scripts/check.sh
+RIVER_TEST_DATABASE_URL='postgres://.../helpers_test?sslmode=disable' DEPS_TEST_REDIS_ADDR=127.0.0.1:6379 DEPS_TEST_SENTINEL_ADDR=127.0.0.1:26379 bash scripts/check.sh
 ```
 
 It checks formatting, the single-module/package boundaries, vet/race tests, actual PostgreSQL River initialization/composition, Redis outage/recovery through a TCP cut, the frozen frontend-parser fixtures and reachable vulnerabilities. The PostgreSQL test login must be able to create temporary test databases; tests remove only their own databases/schemas. For a quick API-only check, run `go test ./api/...`.

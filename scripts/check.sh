@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 export GOWORK=off
 : "${RIVER_TEST_DATABASE_URL:?Set RIVER_TEST_DATABASE_URL to an owned PostgreSQL test database}"
 : "${DEPS_TEST_REDIS_ADDR:?Set DEPS_TEST_REDIS_ADDR to a Redis for deps integration tests}"
+: "${DEPS_TEST_SENTINEL_ADDR:?Set DEPS_TEST_SENTINEL_ADDR to a Sentinel monitoring mymaster}"
 
 mapfile -t modules < <(git ls-files --cached --others --exclude-standard -- go.mod '**/go.mod')
 [[ "${#modules[@]}" == 1 && "${modules[0]}" == go.mod ]] || { echo "helpers requires exactly one root go.mod" >&2; exit 1; }

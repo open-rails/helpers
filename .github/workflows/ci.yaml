@@ -22,15 +22,12 @@ jobs:
           POSTGRES_DB: helpers_test
         ports: ['5432:5432']
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
-      redis:
-        image: redis:8-alpine
-        ports: ['6379:6379']
-        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       GOWORK: 'off'
       GOMAXPROCS: '2'
       RIVER_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/helpers_test?sslmode=disable
       DEPS_TEST_REDIS_ADDR: 127.0.0.1:6379
+      DEPS_TEST_SENTINEL_ADDR: 127.0.0.1:26379
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -41,6 +38,18 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
+      - name: Start Redis and Sentinel
+        run: |
+          docker run -d --name redis -p 127.0.0.1:6379:6379 redis:8-alpine
+          ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' redis)"
+          docker run -d --name sentinel -p 127.0.0.1:26379:26379 --entrypoint sh redis:8-alpine -c \
+            "printf 'port 26379\nsentinel monitor mymaster $ip 6379 1\n' > /tmp/s.conf && exec redis-sentinel /tmp/s.conf"
+          for i in $(seq 1 30); do
+            docker exec sentinel redis-cli -p 26379 sentinel get-master-addr-by-name mymaster | grep -q "$ip" && exit 0
+            sleep 1
+          done
+          docker logs sentinel
+          exit 1
       - run: bash scripts/check.sh
   injection-scan:
     uses: ./.github/workflows/injection-scan.yml

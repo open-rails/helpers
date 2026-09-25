@@ -306,3 +306,75 @@ func TestRetryWaitsForRequiredDependency(t *testing.T) {
 		t.Fatalf("retry after ctx end = %v", err)
 	}
 }
+
+// A primary that refuses writes (min-replicas-to-write with no replica) is
+// down for the data path and for the probe, so callers stay on the fallback.
+func TestRedisRefusingWritesIsDown(t *testing.T) {
+	addr := testRedisAddr(t)
+	admin := redis.NewClient(&redis.Options{Addr: addr})
+	defer admin.Close()
+	ctx := t.Context()
+	if err := admin.ConfigSet(ctx, "min-replicas-to-write", "1").Err(); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.ConfigSet(context.Background(), "min-replicas-to-write", "0")
+
+	sup := New(WithTiming(fastTiming))
+	client := NewRedis(RedisConfig{Addrs: []string{addr}})
+	defer client.Close()
+	dep := sup.AddRedis("redis", client)
+	sw := NewSwitch[counterStore](dep, redisCounter{client}, func() counterStore { return &memCounter{m: map[string]int64{}} })
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sup.Start(runCtx)
+	eventually(t, "failed probes", func() bool { return dep.Status().ConsecutiveFailures >= 2 })
+	if dep.Up() || !strings.Contains(dep.Status().LastError, "NOREPLICAS") {
+		t.Fatalf("status %+v", dep.Status())
+	}
+	if !RedisUnavailable(client.Incr(ctx, "deps-test:noreplicas").Err()) {
+		t.Fatal("NOREPLICAS not classified as unavailable")
+	}
+	n, err := Call(sw, func(s counterStore) (int64, error) { return s.Incr(ctx, "k") })
+	if err != nil || n != 1 {
+		t.Fatalf("fallback incr = %d, %v", n, err)
+	}
+	admin.ConfigSet(ctx, "min-replicas-to-write", "0")
+	eventually(t, "writable again", dep.Up)
+}
+
+// DEPS_TEST_SENTINEL_ADDR points at a Sentinel monitoring master "mymaster".
+func TestSentinelConfigFollowsMaster(t *testing.T) {
+	sentinel := os.Getenv("DEPS_TEST_SENTINEL_ADDR")
+	if sentinel == "" {
+		t.Skip("set DEPS_TEST_SENTINEL_ADDR for the Sentinel integration test")
+	}
+	cfg := RedisConfig{MasterName: "mymaster", SentinelAddrs: []string{sentinel}}
+	if err := cfg.Validate(); err != nil || !cfg.Configured() {
+		t.Fatalf("config: %v", err)
+	}
+	client := NewRedis(cfg)
+	defer client.Close()
+	sup := New(WithTiming(fastTiming))
+	dep := sup.AddRedis("redis", client)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sup.Start(ctx)
+	eventually(t, "sentinel-resolved master up", dep.Up)
+	if err := client.Set(ctx, "deps-test:sentinel", "1", time.Minute).Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRedisConfigValidate(t *testing.T) {
+	for _, c := range []RedisConfig{
+		{MasterName: "redis"},
+		{SentinelAddrs: []string{"s:26379"}},
+	} {
+		if c.Validate() == nil {
+			t.Fatalf("%+v accepted", c)
+		}
+	}
+	if (RedisConfig{Addrs: []string{" "}}).Configured() {
+		t.Fatal("blank address counted as configured")
+	}
+}
