@@ -123,10 +123,16 @@ type Dependency struct {
 	everDown     atomic.Bool
 	// gen counts data-path failures; a probe that started before the latest
 	// one cannot vouch for the dependency.
-	gen    atomic.Uint64
-	kick   chan struct{}
-	hooks  chan bool
-	cancel context.CancelFunc
+	gen     atomic.Uint64
+	stateMu sync.Mutex // orders Report against a probe's up transition
+	kick    chan struct{}
+	cancel  context.CancelFunc
+	closer  func()
+	done    chan struct{}
+
+	hookMu     sync.Mutex
+	hookQueue  []bool
+	hookNotify chan struct{}
 
 	mu          sync.Mutex
 	since       time.Time
@@ -149,6 +155,11 @@ func ProbeTimeout(t time.Duration) DepOption { return func(d *Dependency) { d.pr
 // DownAfter sets how many consecutive failed probes mark it down.
 func DownAfter(n int) DepOption { return func(d *Dependency) { d.downAfter = n } }
 
+// OnClose releases resources the probe holds (such as a dedicated
+// connection). It runs once, after the dependency stops: when it is replaced
+// by a same-named Add or the supervisor's context ends.
+func OnClose(fn func()) DepOption { return func(d *Dependency) { d.closer = fn } }
+
 // Add registers a dependency, replacing (and stopping) any earlier one with the
 // same name. unavailable classifies data-path errors passed to Report; nil uses
 // IsConnectivity. Dependencies added after Start start at once.
@@ -158,7 +169,7 @@ func (s *Supervisor) Add(name string, class Class, probe Probe, unavailable func
 	}
 	d := &Dependency{sup: s, name: name, class: class, probe: probe, unavailable: unavailable,
 		probeTimeout: s.timing.Timeout, downAfter: 1,
-		kick: make(chan struct{}, 1), hooks: make(chan bool, 64), since: time.Now()}
+		kick: make(chan struct{}, 1), hookNotify: make(chan struct{}, 1), done: make(chan struct{}), since: time.Now()}
 	if class == Required {
 		d.downAfter = s.timing.RequiredDownAfter
 	}
@@ -201,9 +212,18 @@ func (s *Supervisor) Start(ctx context.Context) {
 func (d *Dependency) start(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	d.cancel = cancel
-	go d.run(ctx)
+	go func() {
+		defer close(d.done)
+		d.run(ctx)
+		if d.closer != nil {
+			d.closer()
+		}
+	}()
 	go d.runHooks(ctx)
 }
+
+// Done is closed once the dependency has stopped and released its resources.
+func (d *Dependency) Done() <-chan struct{} { return d.done }
 
 // SetReady marks the process as built and able to serve.
 func (s *Supervisor) SetReady() { s.ready.Store(true) }
@@ -256,9 +276,12 @@ func (d *Dependency) Report(err error) bool {
 	if d == nil || err == nil || !d.unavailable(err) {
 		return false
 	}
+	d.stateMu.Lock()
 	d.gen.Add(1)
 	d.everDown.Store(true)
-	if d.up.CompareAndSwap(true, false) {
+	flipped := d.up.CompareAndSwap(true, false)
+	d.stateMu.Unlock()
+	if flipped {
 		d.mu.Lock()
 		d.lastErr = err
 		d.mu.Unlock()
@@ -285,6 +308,7 @@ func (d *Dependency) run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		d.stateMu.Lock()
 		stale := d.gen.Load() != gen
 		lastGen = d.gen.Load()
 		switch {
@@ -293,6 +317,9 @@ func (d *Dependency) run(ctx context.Context) {
 		case err == nil:
 			successes, failures = successes+1, 0
 			if !d.up.Load() && (successes >= t.RecoverAfter || !d.everDown.Load()) {
+				if testHookBeforeUp != nil {
+					testHookBeforeUp()
+				}
 				d.up.Store(true)
 			}
 		default:
@@ -302,6 +329,7 @@ func (d *Dependency) run(ctx context.Context) {
 				d.up.Store(false)
 			}
 		}
+		d.stateMu.Unlock()
 		d.record(err)
 
 		var wait time.Duration
@@ -333,7 +361,17 @@ func (d *Dependency) runHooks(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case up := <-d.hooks:
+		case <-d.hookNotify:
+		}
+		for {
+			d.hookMu.Lock()
+			if len(d.hookQueue) == 0 {
+				d.hookMu.Unlock()
+				break
+			}
+			up := d.hookQueue[0]
+			d.hookQueue = d.hookQueue[1:]
+			d.hookMu.Unlock()
 			d.mu.Lock()
 			hooks := d.onDown
 			if up {
@@ -345,6 +383,28 @@ func (d *Dependency) runHooks(ctx context.Context) {
 				h(ctx)
 			}
 		}
+	}
+}
+
+// queueHook never blocks the probe loop. While hooks lag behind, the queue is
+// coalesced to at most one down followed by the latest state, so every outage
+// still reaches the down hooks and the up hooks see the final recovery.
+func (d *Dependency) queueHook(up bool) {
+	d.hookMu.Lock()
+	if n := len(d.hookQueue); n == 0 || d.hookQueue[n-1] != up {
+		d.hookQueue = append(d.hookQueue, up)
+	}
+	if len(d.hookQueue) > 2 {
+		if up {
+			d.hookQueue = []bool{false, true}
+		} else {
+			d.hookQueue = []bool{false}
+		}
+	}
+	d.hookMu.Unlock()
+	select {
+	case d.hookNotify <- struct{}{}:
+	default:
 	}
 }
 
@@ -385,9 +445,13 @@ func (d *Dependency) record(probeErr error) {
 		log.Error("dependency down", "error", errString(lastErr))
 	}
 	if !first {
-		d.hooks <- up
+		d.queueHook(up)
 	}
 }
+
+// testHookBeforeUp runs between a probe's staleness check and its up
+// transition (tests only).
+var testHookBeforeUp func()
 
 // Status is a point-in-time view of one dependency.
 type Status struct {

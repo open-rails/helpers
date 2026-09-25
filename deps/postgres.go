@@ -35,11 +35,11 @@ func PostgresUnavailable(err error) bool {
 
 // PostgresProbe checks Postgres over one dedicated connection, so a saturated
 // application pool never reads as Postgres being down. The connection is
-// re-dialed after any failure.
-func PostgresProbe(cfg *pgx.ConnConfig) Probe {
+// re-dialed after any failure. Pass close to Add as OnClose.
+func PostgresProbe(cfg *pgx.ConnConfig) (probe Probe, close func()) {
 	var mu sync.Mutex
 	var conn *pgx.Conn
-	return func(ctx context.Context) error {
+	probe = func(ctx context.Context) error {
 		mu.Lock()
 		defer mu.Unlock()
 		if conn == nil {
@@ -56,4 +56,20 @@ func PostgresProbe(cfg *pgx.ConnConfig) Probe {
 		}
 		return nil
 	}
+	close = func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if conn != nil {
+			_ = conn.Close(context.Background())
+			conn = nil
+		}
+	}
+	return probe, close
+}
+
+// AddPostgres supervises Postgres as a required dependency over a dedicated
+// connection that is closed when the dependency stops.
+func (s *Supervisor) AddPostgres(name string, cfg *pgx.ConnConfig, opts ...DepOption) *Dependency {
+	probe, closeConn := PostgresProbe(cfg)
+	return s.Add(name, Required, probe, PostgresUnavailable, append(opts, OnClose(closeConn))...)
 }

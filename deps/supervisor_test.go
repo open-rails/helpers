@@ -3,6 +3,7 @@ package deps
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -172,4 +173,77 @@ func TestAddReplacesDependencyOfSameName(t *testing.T) {
 	if oldCalls.Load() > n+1 {
 		t.Fatal("replaced dependency still probing")
 	}
+}
+
+// A Report that lands between a probe's staleness check and its up
+// transition is not lost: it is ordered after the transition and wins.
+func TestReportAtUpTransitionIsNotLost(t *testing.T) {
+	var fail atomic.Bool
+	sup := New(WithTiming(Timing{Interval: time.Hour, Timeout: time.Second, BackoffBase: time.Millisecond, BackoffMax: 2 * time.Millisecond, RecoverAfter: 1}))
+	dep := sup.Add("redis", Optional, func(context.Context) error {
+		if fail.Load() {
+			return errors.New("down")
+		}
+		return nil
+	}, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sup.Start(ctx)
+	eventually(t, "up", dep.Up)
+	fail.Store(true)
+	dep.Report(context.DeadlineExceeded)
+	eventually(t, "failing probes", func() bool { return dep.Status().ConsecutiveFailures > 0 })
+
+	reported := make(chan struct{})
+	var once sync.Once
+	testHookBeforeUp = func() {
+		once.Do(func() {
+			go func() { fail.Store(true); dep.Report(context.DeadlineExceeded); close(reported) }()
+			time.Sleep(20 * time.Millisecond) // the window the race needs
+		})
+	}
+	t.Cleanup(func() { testHookBeforeUp = nil })
+	fail.Store(false)
+	<-reported
+	eventually(t, "the up transition completed", func() bool { return dep.Status().TransitionsUp >= 1 })
+	time.Sleep(20 * time.Millisecond)
+	if dep.Up() {
+		t.Fatal("a Report racing the up transition was lost")
+	}
+}
+
+// A hook that never returns cannot stall the probe loop, and later
+// transitions still reach the hooks once it is unblocked.
+func TestHungHookDoesNotStallProbeLoop(t *testing.T) {
+	var fail atomic.Bool
+	sup := New(WithTiming(Timing{Interval: time.Millisecond, Timeout: time.Second, BackoffBase: time.Millisecond, BackoffMax: time.Millisecond, RecoverAfter: 1}))
+	dep := sup.Add("redis", Optional, func(context.Context) error {
+		if fail.Load() {
+			return errors.New("down")
+		}
+		return nil
+	}, nil)
+	release := make(chan struct{})
+	var downs, ups atomic.Int32
+	dep.OnDown(func(ctx context.Context) {
+		if downs.Add(1) == 1 {
+			<-release
+		}
+	})
+	dep.OnUp(func(context.Context) { ups.Add(1) })
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sup.Start(ctx)
+	eventually(t, "up", dep.Up)
+	for range 200 { // far more transitions than any fixed queue could hold
+		fail.Store(true)
+		eventually(t, "down", func() bool { return !dep.Up() })
+		fail.Store(false)
+		eventually(t, "up", dep.Up)
+	}
+	if got := dep.Status().TransitionsDown; got < 200 {
+		t.Fatalf("probe loop stalled: %d down transitions", got)
+	}
+	close(release)
+	eventually(t, "coalesced hooks delivered", func() bool { return downs.Load() >= 2 && ups.Load() >= 1 })
 }
