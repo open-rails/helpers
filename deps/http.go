@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -94,12 +95,30 @@ type gaugeFunc struct {
 
 // GaugeFunc exports fn's samples as a gauge on /metrics, read at scrape time
 // (e.g. the age of a peer's cached keys). name must be a valid Prometheus
-// metric name; fn must be cheap and safe for concurrent use.
-func (s *Supervisor) GaugeFunc(name, help string, fn func() []Sample) {
+// metric name not already exported; fn must be cheap and safe for concurrent
+// use. Samples with an invalid label name are skipped.
+func (s *Supervisor) GaugeFunc(name, help string, fn func() []Sample) error {
+	if !metricName.MatchString(name) {
+		return fmt.Errorf("deps: invalid metric name %q", name)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if slices.Contains(builtinMetrics, name) ||
+		slices.ContainsFunc(s.counters, func(c *Counter) bool { return c.name == name }) ||
+		slices.ContainsFunc(s.gauges, func(g gaugeFunc) bool { return g.name == name }) {
+		return fmt.Errorf("deps: metric %q is already exported", name)
+	}
 	s.gauges = append(s.gauges, gaugeFunc{name: name, help: help, fn: fn})
+	return nil
 }
+
+var (
+	metricName     = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
+	labelName      = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+	builtinMetrics = []string{"app_ready", "app_dependency_up", "app_dependency_transitions_total"}
+	helpEscaper    = strings.NewReplacer(`\`, `\\`, "\n", `\n`)
+	labelEscaper   = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+)
 
 // Metrics writes Prometheus text exposition.
 func (s *Supervisor) Metrics(w http.ResponseWriter, _ *http.Request) {
@@ -127,8 +146,14 @@ func (s *Supervisor) Metrics(w http.ResponseWriter, _ *http.Request) {
 	gauges := slices.Clone(s.gauges)
 	s.mu.Unlock()
 	for _, g := range gauges {
-		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n", g.name, g.help, g.name)
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n", g.name, helpEscaper.Replace(g.help), g.name)
+	samples:
 		for _, sm := range g.fn() {
+			for _, l := range sm.Labels {
+				if !labelName.MatchString(l.Name) {
+					continue samples
+				}
+			}
 			b.WriteString(g.name)
 			if len(sm.Labels) > 0 {
 				b.WriteByte('{')
@@ -136,7 +161,7 @@ func (s *Supervisor) Metrics(w http.ResponseWriter, _ *http.Request) {
 					if i > 0 {
 						b.WriteByte(',')
 					}
-					fmt.Fprintf(&b, "%s=%q", l.Name, l.Value)
+					fmt.Fprintf(&b, "%s=\"%s\"", l.Name, labelEscaper.Replace(l.Value))
 				}
 				b.WriteByte('}')
 			}
