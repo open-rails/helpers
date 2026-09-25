@@ -8,9 +8,11 @@ import (
 
 func TestGaugeFuncIsExported(t *testing.T) {
 	sup := New()
-	sup.GaugeFunc("app_peer_jwks_age_seconds", "Seconds since the peer's keys were last fetched.", func() []Sample {
+	if err := sup.GaugeFunc("app_peer_jwks_age_seconds", "Seconds since the peer's keys were last fetched.", func() []Sample {
 		return []Sample{{Labels: []Label{{"issuer", `https://a.example "x"`}}, Value: 42.5}, {Value: 1}}
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	rec := httptest.NewRecorder()
 	sup.Metrics(rec, httptest.NewRequest("GET", MetricsPath, nil))
 	body := rec.Body.String()
