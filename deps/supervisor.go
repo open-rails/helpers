@@ -43,6 +43,9 @@ type Timing struct {
 	BackoffBase  time.Duration // first backoff ceiling while down (500ms)
 	BackoffMax   time.Duration // backoff ceiling cap (30s)
 	RecoverAfter int           // consecutive successes before down→up (2)
+	// RequiredDownAfter is how many consecutive failed probes mark a required
+	// dependency down (3); optional ones go down on the first.
+	RequiredDownAfter int
 }
 
 func (t Timing) withDefaults() Timing {
@@ -60,6 +63,9 @@ func (t Timing) withDefaults() Timing {
 	}
 	if t.RecoverAfter <= 0 {
 		t.RecoverAfter = 2
+	}
+	if t.RequiredDownAfter <= 0 {
+		t.RequiredDownAfter = 3
 	}
 	return t
 }
@@ -106,13 +112,21 @@ func New(opts ...Option) *Supervisor {
 
 // Dependency is one supervised external system.
 type Dependency struct {
-	sup         *Supervisor
-	name        string
-	class       Class
-	probe       Probe
-	unavailable func(error) bool
-	up          atomic.Bool
-	kick        chan struct{}
+	sup          *Supervisor
+	name         string
+	class        Class
+	probe        Probe
+	unavailable  func(error) bool
+	probeTimeout time.Duration
+	downAfter    int
+	up           atomic.Bool
+	everDown     atomic.Bool
+	// gen counts data-path failures; a probe that started before the latest
+	// one cannot vouch for the dependency.
+	gen    atomic.Uint64
+	kick   chan struct{}
+	hooks  chan bool
+	cancel context.CancelFunc
 
 	mu          sync.Mutex
 	since       time.Time
@@ -120,26 +134,54 @@ type Dependency struct {
 	failures    int
 	toUp        int64
 	toDown      int64
-	onUp        []func()
-	onDown      []func()
+	onUp        []func(context.Context)
+	onDown      []func(context.Context)
 	reported    bool
 	initialized bool
 }
 
-// Add registers a dependency. unavailable classifies data-path errors passed to
-// Report; nil uses IsConnectivity. Dependencies added after Start start at once.
-func (s *Supervisor) Add(name string, class Class, probe Probe, unavailable func(error) bool) *Dependency {
+// DepOption tunes one dependency.
+type DepOption func(*Dependency)
+
+// ProbeTimeout overrides the per-probe timeout for this dependency.
+func ProbeTimeout(t time.Duration) DepOption { return func(d *Dependency) { d.probeTimeout = t } }
+
+// DownAfter sets how many consecutive failed probes mark it down.
+func DownAfter(n int) DepOption { return func(d *Dependency) { d.downAfter = n } }
+
+// Add registers a dependency, replacing (and stopping) any earlier one with the
+// same name. unavailable classifies data-path errors passed to Report; nil uses
+// IsConnectivity. Dependencies added after Start start at once.
+func (s *Supervisor) Add(name string, class Class, probe Probe, unavailable func(error) bool, opts ...DepOption) *Dependency {
 	if unavailable == nil {
 		unavailable = IsConnectivity
 	}
-	d := &Dependency{sup: s, name: name, class: class, probe: probe, unavailable: unavailable, kick: make(chan struct{}, 1), since: time.Now()}
-	s.mu.Lock()
-	s.deps = append(s.deps, d)
-	started, ctx := s.started, s.ctx
-	s.mu.Unlock()
-	if started {
-		go d.run(ctx)
+	d := &Dependency{sup: s, name: name, class: class, probe: probe, unavailable: unavailable,
+		probeTimeout: s.timing.Timeout, downAfter: 1,
+		kick: make(chan struct{}, 1), hooks: make(chan bool, 64), since: time.Now()}
+	if class == Required {
+		d.downAfter = s.timing.RequiredDownAfter
 	}
+	for _, o := range opts {
+		o(d)
+	}
+	s.mu.Lock()
+	replaced := false
+	for i, old := range s.deps {
+		if old.name == name {
+			if old.cancel != nil {
+				old.cancel()
+			}
+			s.deps[i], replaced = d, true
+		}
+	}
+	if !replaced {
+		s.deps = append(s.deps, d)
+	}
+	if s.started {
+		d.start(s.ctx)
+	}
+	s.mu.Unlock()
 	return d
 }
 
@@ -152,8 +194,15 @@ func (s *Supervisor) Start(ctx context.Context) {
 	}
 	s.started, s.ctx = true, ctx
 	for _, d := range s.deps {
-		go d.run(ctx)
+		d.start(ctx)
 	}
+}
+
+func (d *Dependency) start(parent context.Context) {
+	ctx, cancel := context.WithCancel(parent)
+	d.cancel = cancel
+	go d.run(ctx)
+	go d.runHooks(ctx)
 }
 
 // SetReady marks the process as built and able to serve.
@@ -185,15 +234,16 @@ func (d *Dependency) Class() Class { return d.class }
 func (d *Dependency) Up() bool { return d != nil && d.up.Load() }
 
 // OnUp registers fn to run after each down→up transition (not the first up).
-// Hooks run on the supervisor goroutine and must not block for long.
-func (d *Dependency) OnUp(fn func()) {
+// Hooks run in order on a goroutine of their own, never on the probe loop,
+// with a context that ends when the supervisor stops.
+func (d *Dependency) OnUp(fn func(context.Context)) {
 	d.mu.Lock()
 	d.onUp = append(d.onUp, fn)
 	d.mu.Unlock()
 }
 
 // OnDown registers fn to run after each up→down transition.
-func (d *Dependency) OnDown(fn func()) {
+func (d *Dependency) OnDown(fn func(context.Context)) {
 	d.mu.Lock()
 	d.onDown = append(d.onDown, fn)
 	d.mu.Unlock()
@@ -206,6 +256,8 @@ func (d *Dependency) Report(err error) bool {
 	if d == nil || err == nil || !d.unavailable(err) {
 		return false
 	}
+	d.gen.Add(1)
+	d.everDown.Store(true)
 	if d.up.CompareAndSwap(true, false) {
 		d.mu.Lock()
 		d.lastErr = err
@@ -220,30 +272,41 @@ func (d *Dependency) Report(err error) bool {
 
 func (d *Dependency) run(ctx context.Context) {
 	t := d.sup.timing
-	attempt, successes, failed := 0, 0, false
+	attempt, successes, failures := 0, 0, 0
+	lastGen := d.gen.Load()
 	for {
-		pctx, cancel := context.WithTimeout(ctx, t.Timeout)
+		gen := d.gen.Load()
+		if gen != lastGen {
+			successes = 0 // a data-path failure since the last probe
+		}
+		pctx, cancel := context.WithTimeout(ctx, d.probeTimeout)
 		err := d.probe(pctx)
 		cancel()
 		if ctx.Err() != nil {
 			return
 		}
-		if err == nil {
-			successes++
-			// Hysteresis only guards recovery; a dependency that has never
-			// failed is up on its first successful probe.
-			if !d.up.Load() && (successes >= t.RecoverAfter || !failed) {
+		stale := d.gen.Load() != gen
+		lastGen = d.gen.Load()
+		switch {
+		case err == nil && stale:
+			successes = 0
+		case err == nil:
+			successes, failures = successes+1, 0
+			if !d.up.Load() && (successes >= t.RecoverAfter || !d.everDown.Load()) {
 				d.up.Store(true)
 			}
-		} else {
-			successes, failed = 0, true
-			d.up.Store(false)
+		default:
+			successes, failures = 0, failures+1
+			if failures >= d.downAfter {
+				d.everDown.Store(true)
+				d.up.Store(false)
+			}
 		}
 		d.record(err)
 
 		var wait time.Duration
 		switch {
-		case d.up.Load():
+		case d.up.Load() && err == nil:
 			attempt, wait = 0, t.Interval
 		case err == nil:
 			wait = t.BackoffBase
@@ -258,14 +321,34 @@ func (d *Dependency) run(ctx context.Context) {
 			return
 		case <-d.kick:
 			timer.Stop()
-			attempt, successes, failed = 0, 0, true
+			attempt, successes = 0, 0
 			d.record(nil)
 		case <-timer.C:
 		}
 	}
 }
 
-// record logs and fires hooks when the observed state differs from the last
+func (d *Dependency) runHooks(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case up := <-d.hooks:
+			d.mu.Lock()
+			hooks := d.onDown
+			if up {
+				hooks = d.onUp
+			}
+			hooks = append([]func(context.Context){}, hooks...)
+			d.mu.Unlock()
+			for _, h := range hooks {
+				h(ctx)
+			}
+		}
+	}
+}
+
+// record logs and queues hooks when the observed state differs from the last
 // reported one. probeErr is the latest probe error (nil on success or kick).
 func (d *Dependency) record(probeErr error) {
 	up := d.up.Load()
@@ -282,15 +365,12 @@ func (d *Dependency) record(probeErr error) {
 	}
 	first := !d.initialized
 	d.initialized, d.reported, d.since = true, up, time.Now()
-	var hooks []func()
-	if up {
-		if !first {
+	if !first {
+		if up {
 			d.toUp++
-			hooks = append(hooks, d.onUp...)
+		} else {
+			d.toDown++
 		}
-	} else if !first {
-		d.toDown++
-		hooks = append(hooks, d.onDown...)
 	}
 	lastErr := d.lastErr
 	d.mu.Unlock()
@@ -304,8 +384,8 @@ func (d *Dependency) record(probeErr error) {
 	default:
 		log.Error("dependency down", "error", errString(lastErr))
 	}
-	for _, h := range hooks {
-		h()
+	if !first {
+		d.hooks <- up
 	}
 }
 

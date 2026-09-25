@@ -1,6 +1,9 @@
 package deps
 
-import "sync/atomic"
+import (
+	"context"
+	"sync/atomic"
+)
 
 // Switch serves a primary backend while its dependency is up and a local
 // fallback otherwise. Fallback state is never merged back: every down→up
@@ -20,7 +23,7 @@ func NewSwitch[T any](dep *Dependency, primary T, newFallback func() T) *Switch[
 	fb := newFallback()
 	s.fallback.Store(&fb)
 	if dep != nil {
-		dep.OnUp(func() {
+		dep.OnUp(func(context.Context) {
 			fb := s.newFallback()
 			s.fallback.Store(&fb)
 		})

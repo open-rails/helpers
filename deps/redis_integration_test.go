@@ -135,8 +135,8 @@ func TestRedisOutageFallsBackAndRecovers(t *testing.T) {
 	defer client.Close()
 	dep := sup.AddRedis("redis", client)
 	var ups, downs atomic.Int32
-	dep.OnUp(func() { ups.Add(1) })
-	dep.OnDown(func() { downs.Add(1) })
+	dep.OnUp(func(context.Context) { ups.Add(1) })
+	dep.OnDown(func(context.Context) { downs.Add(1) })
 	sw := NewSwitch[counterStore](dep, redisCounter{client}, func() counterStore { return &memCounter{m: map[string]int64{}} })
 	sup.Start(ctx)
 
