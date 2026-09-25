@@ -36,7 +36,7 @@ When importing both the helpers and upstream River, use a descriptive alias such
 
 `deps.NewRedis(RedisConfig)` returns a `redis.UniversalClient` without dialing: `master_name` with `sentinel_addrs` gives a Sentinel failover client (the Sentinel password defaults to `password`), otherwise one of `addrs` gives a plain client and several a cluster client. `AddRedis` registers it as optional; its probe writes a short-lived key, so a primary that refuses writes (`NOREPLICAS`, `READONLY`) is down too.
 
-HTTP: `Gate()` is the application listener's handler and can bind before the application is built. It serves `/livez` (always 200, never checks dependencies) and `/readyz` (200 once `Open(app)` is called, 503 after `Drain()`), and returns 503 for everything else until `Open`. `OpsHandler()` adds `/statusz` (JSON per dependency) and `/metrics` (`app_ready`, `app_dependency_up{dependency,class}`, `app_dependency_transitions_total`, and `Counter`s) for an internal port.
+HTTP: `Gate()` is the application listener's handler and can bind before the application is built. It serves `/livez` (always 200, never checks dependencies) and `/readyz` (200 once `Open(app)` is called, 503 after `Drain()`), and returns 503 for everything else until `Open`. `OpsHandler()` adds `/statusz` (JSON per dependency) and `/metrics` (`app_ready`, `app_dependency_up{dependency,class}`, `app_dependency_transitions_total`, `Counter`s, and `GaugeFunc` gauges read at scrape time) for an internal port.
 
 ## Migration
 

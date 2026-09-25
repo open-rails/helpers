@@ -89,6 +89,7 @@ type Supervisor struct {
 	mu       sync.Mutex
 	deps     []*Dependency
 	counters []*Counter
+	gauges   []gaugeFunc
 	started  bool
 	ctx      context.Context
 	ready    atomic.Bool
