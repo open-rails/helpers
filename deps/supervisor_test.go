@@ -290,3 +290,16 @@ func TestUpIntervalIsJittered(t *testing.T) {
 		t.Fatal("up-interval is not jittered")
 	}
 }
+
+func TestDownIntervalFloorsProbesWhileFailing(t *testing.T) {
+	sup := New(WithTiming(fastTiming))
+	var n atomic.Int32
+	dep := sup.Add("twilio", Optional, func(context.Context) error { n.Add(1); return errors.New("down") }, nil, DownInterval(time.Hour))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sup.Start(ctx)
+	time.Sleep(400 * time.Millisecond)
+	if got := n.Load(); got != 1 || dep.Up() {
+		t.Fatalf("probed %d times while failing, want 1 (floor 1h)", got)
+	}
+}

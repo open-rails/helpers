@@ -119,6 +119,7 @@ type Dependency struct {
 	unavailable  func(error) bool
 	probeTimeout time.Duration
 	interval     time.Duration
+	downFloor    time.Duration
 	downAfter    int
 	up           atomic.Bool
 	everDown     atomic.Bool
@@ -160,6 +161,17 @@ func ProbeInterval(t time.Duration) DepOption {
 	return func(d *Dependency) {
 		if t > 0 {
 			d.interval = t
+		}
+	}
+}
+
+// DownInterval sets the least time between probes while this dependency is
+// failing (±10% jitter), for probes that cost something: the capped backoff
+// applies above it. A non-positive t leaves the backoff alone.
+func DownInterval(t time.Duration) DepOption {
+	return func(d *Dependency) {
+		if t > 0 {
+			d.downFloor = t
 		}
 	}
 }
@@ -359,7 +371,7 @@ func (d *Dependency) run(ctx context.Context) {
 		case err == nil:
 			wait = t.BackoffBase
 		default:
-			wait = Backoff(attempt, t.BackoffBase, t.BackoffMax)
+			wait = max(Backoff(attempt, t.BackoffBase, t.BackoffMax), jitter(d.downFloor))
 			attempt++
 		}
 		timer := time.NewTimer(wait)
