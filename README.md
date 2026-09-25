@@ -8,6 +8,7 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | `github.com/open-rails/helpers/auth` | Request identity and optional scoped permission capability | Standard library |
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
 | `github.com/open-rails/helpers/river` | Initialize River tables and compose one host-owned client | River and pgx |
+| `github.com/open-rails/helpers/deps` | Dependency supervision, Redis client, fallback switch, probe/status/metrics handlers | go-redis |
 
 Import only the packages an application needs. The API core does not import Gin or River. Go builds the imported packages and their dependencies; all packages share this module's version and Go/toolchain requirements.
 
@@ -26,6 +27,16 @@ Consumers define their own `AuthenticateRequest(context.Context, *http.Request) 
 `river.New` combines library contributions, validates registration and binds their producers to the same ordinary River client and actual host pool. Pass the same schema in `riverqueue.Config.Schema`; empty also means `public`. Construction does not migrate or start workers. The host starts/stops that client and retains ownership of the pool. These helpers add neither a scheduler nor billing logic.
 
 When importing both the helpers and upstream River, use a descriptive alias such as `riverhelpers` for `github.com/open-rails/helpers/river`.
+
+## Dependency supervision
+
+`deps.New()` supervises external dependencies. Each one is probed forever: every 10s while up, with full-jitter exponential backoff (500ms to 30s) while down, and it recovers after two consecutive successes. Optional dependencies go down on one failed probe, required ones after three (`DownAfter`, `ProbeTimeout` tune one dependency). `Dependency.Report(err)` marks it down on the first data-path connectivity error; a probe already in flight cannot undo that. `OnUp`/`OnDown` hooks run in order on their own goroutine with the supervisor's context; while they lag, pending transitions coalesce to one down plus the latest state, so a hung hook never stalls probing. Adding a dependency under an existing name replaces it; `OnClose` releases a probe's resources when it is replaced or the supervisor stops. `Supervisor.Retry` waits for a required dependency at startup instead of exiting. `AddPostgres` (built on `PostgresProbe`) checks Postgres over one dedicated connection, closed on replace and stop, so a saturated application pool does not read as an outage; `PostgresUnavailable` classifies connection-level errors.
+
+`deps.NewSwitch(dep, primary, newFallback)` serves the primary while the dependency is up and a local fallback otherwise. `deps.Call`/`deps.Do` retry a call once on the fallback when the primary is unreachable. Fallback state is replaced, never merged, on recovery. Use it only for state whose per-process scope is acceptable (caches, rate-limit windows); state other replicas must see belongs in Postgres.
+
+`deps.NewRedis(RedisConfig)` returns a `redis.UniversalClient` without dialing: `master_name` with `sentinel_addrs` gives a Sentinel failover client (the Sentinel password defaults to `password`), otherwise one of `addrs` gives a plain client and several a cluster client. `AddRedis` registers it as optional; its probe writes a short-lived key, so a primary that refuses writes (`NOREPLICAS`, `READONLY`) is down too.
+
+HTTP: `Gate()` is the application listener's handler and can bind before the application is built. It serves `/livez` (always 200, never checks dependencies) and `/readyz` (200 once `Open(app)` is called, 503 after `Drain()`), and returns 503 for everything else until `Open`. `OpsHandler()` adds `/statusz` (JSON per dependency) and `/metrics` (`app_ready`, `app_dependency_up{dependency,class}`, `app_dependency_transitions_total`, and `Counter`s) for an internal port.
 
 ## Migration
 
@@ -58,10 +69,10 @@ Locally: `scripts/scan-injected-code.sh --root <repo>`. Rules, thresholds and ex
 Use one entry point locally and in CI:
 
 ```sh
-RIVER_TEST_DATABASE_URL='postgres://.../helpers_test?sslmode=disable' bash scripts/check.sh
+RIVER_TEST_DATABASE_URL='postgres://.../helpers_test?sslmode=disable' DEPS_TEST_REDIS_ADDR=127.0.0.1:6379 DEPS_TEST_SENTINEL_ADDR=127.0.0.1:26379 bash scripts/check.sh
 ```
 
-It checks formatting, the single-module/package boundaries, vet/race tests, actual PostgreSQL River initialization/composition, the frozen frontend-parser fixtures and reachable vulnerabilities. The PostgreSQL test login must be able to create temporary test databases; tests remove only their own databases/schemas. For a quick API-only check, run `go test ./api/...`.
+It checks formatting, the single-module/package boundaries, vet/race tests, actual PostgreSQL River initialization/composition, Redis outage/recovery through a TCP cut, the frozen frontend-parser fixtures and reachable vulnerabilities. The PostgreSQL test login must be able to create temporary test databases; tests remove only their own databases/schemas. For a quick API-only check, run `go test ./api/...`.
 
 `api/compat` contains frozen wire/parser evidence, not reverse dependencies on applications. Parser origins and test adaptations are documented in [SPA parser provenance](api/compat/spa/PROVENANCE.md).
 
