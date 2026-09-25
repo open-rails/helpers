@@ -247,3 +247,59 @@ func TestHungHookDoesNotStallProbeLoop(t *testing.T) {
 	close(release)
 	eventually(t, "coalesced hooks delivered", func() bool { return downs.Load() >= 2 && ups.Load() >= 1 })
 }
+
+func TestProbeIntervalSlowsProbesWhileUp(t *testing.T) {
+	sup := New(WithTiming(fastTiming))
+	var fast, slow atomic.Int32
+	sup.Add("fast", Optional, func(context.Context) error { fast.Add(1); return nil }, nil)
+	sup.Add("slow", Optional, func(context.Context) error { slow.Add(1); return nil }, nil, ProbeInterval(time.Hour))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sup.Start(ctx)
+	eventually(t, "fast probed repeatedly", func() bool { return fast.Load() >= 5 })
+	if n := slow.Load(); n != 1 {
+		t.Fatalf("slow dependency probed %d times, want 1", n)
+	}
+}
+
+func TestNonPositiveProbeIntervalKeepsTheDefault(t *testing.T) {
+	sup := New(WithTiming(fastTiming))
+	var n atomic.Int32
+	sup.Add("zero", Optional, func(context.Context) error { n.Add(1); return nil }, nil, ProbeInterval(0))
+	sup.Add("negative", Optional, func(context.Context) error { return nil }, nil, ProbeInterval(-time.Second))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sup.Start(ctx)
+	time.Sleep(300 * time.Millisecond)
+	// fastTiming probes every 50ms while up: ~6 probes, never a busy loop.
+	if got := n.Load(); got > 20 {
+		t.Fatalf("ProbeInterval(0) probed %d times in 300ms", got)
+	}
+}
+
+func TestUpIntervalIsJittered(t *testing.T) {
+	seen := map[time.Duration]bool{}
+	for range 50 {
+		d := jitter(10 * time.Second)
+		if d < 9*time.Second || d > 11*time.Second {
+			t.Fatalf("jitter(10s) = %v outside ±10%%", d)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 2 {
+		t.Fatal("up-interval is not jittered")
+	}
+}
+
+func TestDownIntervalFloorsProbesWhileFailing(t *testing.T) {
+	sup := New(WithTiming(fastTiming))
+	var n atomic.Int32
+	dep := sup.Add("twilio", Optional, func(context.Context) error { n.Add(1); return errors.New("down") }, nil, DownInterval(time.Hour))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sup.Start(ctx)
+	time.Sleep(400 * time.Millisecond)
+	if got := n.Load(); got != 1 || dep.Up() {
+		t.Fatalf("probed %d times while failing, want 1 (floor 1h)", got)
+	}
+}

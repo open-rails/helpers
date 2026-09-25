@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,6 +78,29 @@ func (s *Supervisor) Counter(name, help string) *Counter {
 	return c
 }
 
+// Label is one Prometheus label of a Sample.
+type Label struct{ Name, Value string }
+
+// Sample is one labelled value of a GaugeFunc.
+type Sample struct {
+	Labels []Label
+	Value  float64
+}
+
+type gaugeFunc struct {
+	name, help string
+	fn         func() []Sample
+}
+
+// GaugeFunc exports fn's samples as a gauge on /metrics, read at scrape time
+// (e.g. the age of a peer's cached keys). name must be a valid Prometheus
+// metric name; fn must be cheap and safe for concurrent use.
+func (s *Supervisor) GaugeFunc(name, help string, fn func() []Sample) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gauges = append(s.gauges, gaugeFunc{name: name, help: help, fn: fn})
+}
+
 // Metrics writes Prometheus text exposition.
 func (s *Supervisor) Metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -98,6 +122,26 @@ func (s *Supervisor) Metrics(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Unlock()
 	for _, c := range counters {
 		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", c.name, c.help, c.name, c.name, c.Value())
+	}
+	s.mu.Lock()
+	gauges := slices.Clone(s.gauges)
+	s.mu.Unlock()
+	for _, g := range gauges {
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n", g.name, g.help, g.name)
+		for _, sm := range g.fn() {
+			b.WriteString(g.name)
+			if len(sm.Labels) > 0 {
+				b.WriteByte('{')
+				for i, l := range sm.Labels {
+					if i > 0 {
+						b.WriteByte(',')
+					}
+					fmt.Fprintf(&b, "%s=%q", l.Name, l.Value)
+				}
+				b.WriteByte('}')
+			}
+			fmt.Fprintf(&b, " %s\n", strconv.FormatFloat(sm.Value, 'g', -1, 64))
+		}
 	}
 	_, _ = w.Write([]byte(b.String()))
 }
