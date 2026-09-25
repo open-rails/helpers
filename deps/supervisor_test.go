@@ -261,3 +261,32 @@ func TestProbeIntervalSlowsProbesWhileUp(t *testing.T) {
 		t.Fatalf("slow dependency probed %d times, want 1", n)
 	}
 }
+
+func TestNonPositiveProbeIntervalKeepsTheDefault(t *testing.T) {
+	sup := New(WithTiming(fastTiming))
+	var n atomic.Int32
+	sup.Add("zero", Optional, func(context.Context) error { n.Add(1); return nil }, nil, ProbeInterval(0))
+	sup.Add("negative", Optional, func(context.Context) error { return nil }, nil, ProbeInterval(-time.Second))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sup.Start(ctx)
+	time.Sleep(300 * time.Millisecond)
+	// fastTiming probes every 50ms while up: ~6 probes, never a busy loop.
+	if got := n.Load(); got > 20 {
+		t.Fatalf("ProbeInterval(0) probed %d times in 300ms", got)
+	}
+}
+
+func TestUpIntervalIsJittered(t *testing.T) {
+	seen := map[time.Duration]bool{}
+	for range 50 {
+		d := jitter(10 * time.Second)
+		if d < 9*time.Second || d > 11*time.Second {
+			t.Fatalf("jitter(10s) = %v outside ±10%%", d)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 2 {
+		t.Fatal("up-interval is not jittered")
+	}
+}

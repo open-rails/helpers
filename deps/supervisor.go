@@ -154,9 +154,15 @@ type DepOption func(*Dependency)
 func ProbeTimeout(t time.Duration) DepOption { return func(d *Dependency) { d.probeTimeout = t } }
 
 // ProbeInterval overrides the probe period while the dependency is up, for
-// probes that cost something (third-party APIs). Backoff while down is
-// unchanged.
-func ProbeInterval(t time.Duration) DepOption { return func(d *Dependency) { d.interval = t } }
+// probes that cost something (third-party APIs); a non-positive t keeps the
+// supervisor's interval. Backoff while down is unchanged.
+func ProbeInterval(t time.Duration) DepOption {
+	return func(d *Dependency) {
+		if t > 0 {
+			d.interval = t
+		}
+	}
+}
 
 // DownAfter sets how many consecutive failed probes mark it down.
 func DownAfter(n int) DepOption { return func(d *Dependency) { d.downAfter = n } }
@@ -299,6 +305,14 @@ func (d *Dependency) Report(err error) bool {
 	return true
 }
 
+// jitter spreads an up-interval by ±10% so replicas do not probe in lockstep.
+func jitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	return d - d/10 + rand.N(d/5+1)
+}
+
 func (d *Dependency) run(ctx context.Context) {
 	t := d.sup.timing
 	attempt, successes, failures := 0, 0, 0
@@ -341,7 +355,7 @@ func (d *Dependency) run(ctx context.Context) {
 		var wait time.Duration
 		switch {
 		case d.up.Load() && err == nil:
-			attempt, wait = 0, d.interval
+			attempt, wait = 0, jitter(d.interval)
 		case err == nil:
 			wait = t.BackoffBase
 		default:
