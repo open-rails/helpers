@@ -50,7 +50,10 @@ type Scope struct {
 // Can evaluates the exact scope and permission without verifying the request
 // again. It must retain credential ceilings and scope bindings. Consumers must
 // deny privileged access when this capability is absent; never infer a grant
-// from identity metadata. An error denotes an unavailable check, not permission.
+// from identity metadata. An error never grants. One matching ErrExpired or
+// ErrRevoked (with ErrUnauthenticated) is a credential failure: the credential
+// ended after the request was verified, so answer 401. Any other error denotes
+// an unavailable check: answer 503.
 type PermissionChecker interface {
 	Can(context.Context, Scope, string) (bool, error)
 }
