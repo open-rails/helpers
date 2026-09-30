@@ -18,7 +18,7 @@ The core provides typed errors, stable type/code fields, optional request IDs, b
 
 ## Authentication values
 
-Consumers define their own `AuthenticateRequest(context.Context, *http.Request) (auth.Principal, error)` interface. A provider returns the verified identity for that request; an optional `auth.PermissionChecker` on the principal checks a host-resolved immutable scope and permission without verifying sender proof again. Identity-only providers implement only `Identity() auth.Identity`. Missing permission capability denies privileged access. Account mapping, routes, issuer configuration, verification and authorization policy stay with the provider or host.
+Consumers define their own `AuthenticateRequest(context.Context, *http.Request) (auth.Principal, error)` interface. A provider returns the verified identity for that request; an optional `auth.PermissionChecker` on the principal checks a host-resolved immutable scope and permission without verifying sender proof again. Identity-only providers implement only `Identity() auth.Identity`. Missing permission capability denies privileged access. An error from `Can` never grants: `ErrExpired` or `ErrRevoked` is a credential failure (401), anything else an unavailable check (503). Account mapping, routes, issuer configuration, verification and authorization policy stay with the provider or host.
 
 ## River composition
 
