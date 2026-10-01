@@ -5,7 +5,7 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | Import | Purpose | Runtime dependencies |
 | --- | --- | --- |
 | `github.com/open-rails/helpers/api` | HTTP errors, responses, safe metadata and pagination | Standard library |
-| `github.com/open-rails/helpers/auth` | Request identity and optional scoped permission capability | Standard library |
+| `github.com/open-rails/helpers/auth` | Request identity and optional permission and recent sign-in capabilities | Standard library |
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
 | `github.com/open-rails/helpers/river` | Initialize River tables and compose one host-owned client | River and pgx |
 | `github.com/open-rails/helpers/deps` | Dependency supervision, Redis client, fallback switch, probe/status/metrics handlers | go-redis |
@@ -18,7 +18,7 @@ The core provides typed errors, stable type/code fields, optional request IDs, b
 
 ## Authentication values
 
-Consumers define their own `AuthenticateRequest(context.Context, *http.Request) (auth.Principal, error)` interface. A provider returns the verified identity for that request; an optional `auth.PermissionChecker` on the principal checks a host-resolved immutable scope and permission without verifying sender proof again. Identity-only providers implement only `Identity() auth.Identity`. Missing permission capability denies privileged access. An error from `Can` never grants: `ErrExpired` or `ErrRevoked` is a credential failure (401), anything else an unavailable check (503). Account mapping, routes, issuer configuration, verification and authorization policy stay with the provider or host.
+Consumers define their own `AuthenticateRequest(context.Context, *http.Request) (auth.Principal, error)` interface. A provider returns the verified identity for that request; an optional `auth.PermissionChecker` on the principal checks a host-resolved immutable scope and permission without verifying sender proof again. Identity-only providers implement only `Identity() auth.Identity`. Missing permission capability denies privileged access. An error from `Can` never grants: `ErrExpired` or `ErrRevoked` is a credential failure (401), anything else an unavailable check (503). An optional `auth.RecentSignInChecker` answers whether a user's sign-in is recent enough for an action that moves money or grants access; `ErrStepUpRequired` asks the user to sign in again, and a principal without the capability is refused those actions. Account mapping, routes, issuer configuration, verification and authorization policy stay with the provider or host.
 
 ## River composition
 

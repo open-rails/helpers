@@ -58,6 +58,21 @@ type PermissionChecker interface {
 	Can(context.Context, Scope, string) (bool, error)
 }
 
+// RecentSignInChecker is an optional capability of a user Principal, for
+// actions that move money or grant access. CheckRecentSignIn is nil when the
+// credential's own sign-in is recent enough by the provider's policy, checked
+// without verifying the request again. Otherwise its error matches
+// ErrStepUpRequired when the user must sign in again (it may carry the
+// provider's challenge as Metadata() map[string]any, which consumers return
+// to the client unchanged); ErrExpired or ErrRevoked (with
+// ErrUnauthenticated) when the credential ended; ErrForbidden for a
+// credential with no sign-in of its own; ErrUnavailable when the check could
+// not run. Consumers must refuse those actions to a user Principal without
+// this capability.
+type RecentSignInChecker interface {
+	CheckRecentSignIn(context.Context) error
+}
+
 // Authentication failures are classified with errors.Is. Providers may wrap
 // their own errors; consumers must not expose provider error text to clients.
 var (
@@ -67,4 +82,5 @@ var (
 	ErrSenderProofRequired = errors.New("sender proof required")
 	ErrExpired             = errors.New("credential expired")
 	ErrRevoked             = errors.New("credential revoked")
+	ErrStepUpRequired      = errors.New("step-up required")
 )
