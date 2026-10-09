@@ -34,7 +34,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
-          go-version-file: go.mod
+          # Build and scan on the latest patched Go 1.26; go.mod keeps 1.26.6
+          # as the consumers' floor.
+          go-version: '1.26.9'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
