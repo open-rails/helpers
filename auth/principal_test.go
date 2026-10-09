@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,7 @@ import (
 // An independent consumer owns this interface. Exact shared result types let a
 // provider satisfy it without importing that consumer or a particular verifier.
 type authenticator interface {
-	AuthenticateRequest(context.Context, *http.Request) (auth.Principal, error)
+	AuthenticateRequest(context.Context, *http.Request) (auth.Verified, error)
 }
 
 type identityOnly auth.Identity
@@ -24,7 +25,7 @@ func (p identityOnly) Identity() auth.Identity { return auth.Identity(p) }
 // session store. It has no permission API and no dependency on AuthKit.
 type sessionProvider struct{ sessions map[string]auth.Identity }
 
-func (p sessionProvider) AuthenticateRequest(_ context.Context, r *http.Request) (auth.Principal, error) {
+func (p sessionProvider) AuthenticateRequest(_ context.Context, r *http.Request) (auth.Verified, error) {
 	i, ok := p.sessions[r.Header.Get("Authorization")]
 	if !ok {
 		return nil, auth.ErrUnauthenticated
@@ -36,7 +37,7 @@ var _ authenticator = sessionProvider{}
 
 func TestIndependentIdentityOnlyProvider(t *testing.T) {
 	var provider authenticator = sessionProvider{sessions: map[string]auth.Identity{
-		"Bearer known-session": {Kind: auth.KindUser, Issuer: "https://host.example", Subject: "user-7"},
+		"Bearer known-session": {Issuer: "https://host.example", Subject: "user-7", SubjectKind: auth.SubjectUser, Invoker: auth.Invoker{Issuer: "https://host.example", ID: "user-7"}, Credential: auth.Credential{Kind: auth.CredentialSession, ID: "s-1"}},
 	}}
 	r := httptest.NewRequest(http.MethodGet, "https://host.example/account", nil)
 	r.Header.Set("Authorization", "Bearer known-session")
@@ -53,22 +54,22 @@ func TestIndependentIdentityOnlyProvider(t *testing.T) {
 	}
 }
 
-// stepUpPrincipal is a user whose sign-in is too old; its refusal carries the
+// staleSignIn is a user whose sign-in is too old; its refusal carries the
 // provider's challenge for the client.
-type stepUpPrincipal struct{ identityOnly }
+type staleSignIn struct{ identityOnly }
 
 type challenge map[string]any
 
 func (challenge) Error() string              { return "sign in again" }
 func (c challenge) Metadata() map[string]any { return c }
 
-func (stepUpPrincipal) CheckRecentSignIn(context.Context) error {
+func (staleSignIn) CheckRecentSignIn(context.Context) error {
 	return errors.Join(auth.ErrStepUpRequired, challenge{"step_up_methods": []string{"password"}})
 }
 
-// A consumer refuses a sensitive action unless the principal proves a recent
+// A consumer refuses a sensitive action unless the request proves a recent
 // sign-in, and hands the client the provider's challenge.
-func requireRecentSignIn(ctx context.Context, p auth.Principal) (map[string]any, error) {
+func requireRecentSignIn(ctx context.Context, p auth.Verified) (map[string]any, error) {
 	checker, ok := p.(auth.RecentSignInChecker)
 	if !ok {
 		return nil, auth.ErrStepUpRequired
@@ -83,12 +84,35 @@ func requireRecentSignIn(ctx context.Context, p auth.Principal) (map[string]any,
 
 func TestRecentSignInIsOptionalAndFailsClosed(t *testing.T) {
 	ctx := context.Background()
-	user := identityOnly{Kind: auth.KindUser, Issuer: "https://host.example", Subject: "user-7"}
+	user := identityOnly{Issuer: "https://host.example", Subject: "user-7", SubjectKind: auth.SubjectUser, Invoker: auth.Invoker{Issuer: "https://host.example", ID: "user-7"}, Credential: auth.Credential{Kind: auth.CredentialSession, ID: "s-1"}}
 	if _, err := requireRecentSignIn(ctx, user); !errors.Is(err, auth.ErrStepUpRequired) {
-		t.Fatalf("a principal without the capability passed: %v", err)
+		t.Fatalf("a request without the capability passed: %v", err)
 	}
-	metadata, err := requireRecentSignIn(ctx, stepUpPrincipal{user})
+	metadata, err := requireRecentSignIn(ctx, staleSignIn{user})
 	if !errors.Is(err, auth.ErrStepUpRequired) || metadata["step_up_methods"] == nil {
 		t.Fatalf("stale sign-in: %v, %v", metadata, err)
+	}
+}
+
+// A provider's credential state is opaque: encoding drops it, so an Identity
+// rebuilt from data carries none, and only the provider reads it.
+func TestCredentialStateIsNotEncoded(t *testing.T) {
+	type bounds struct{ ceiling []string }
+	state := &bounds{ceiling: []string{"merchant:payments:read"}}
+	id := auth.Identity{Issuer: "https://host.example", Subject: "user-7", SubjectKind: auth.SubjectUser,
+		Invoker: auth.Invoker{Issuer: "https://host.example", ID: "user-7"}, Credential: auth.Credential{Kind: auth.CredentialSession, ID: "s-1"}.WithState(state)}
+	if id.Credential.State() != state {
+		t.Fatal("the provider's state is lost")
+	}
+	b, err := json.Marshal(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded auth.Identity
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Credential.State() != nil || decoded.Subject != id.Subject || decoded.Credential.ID != "s-1" {
+		t.Fatalf("decoded = %+v", decoded)
 	}
 }
