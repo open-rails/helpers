@@ -208,6 +208,7 @@ func TestRefusals(t *testing.T) {
 			{To: "a@example.com", Subject: "hi\r\nBcc: x@evil.example", Text: "t"},
 			{To: "a@example.com\r\nBcc: x@evil.example", Subject: "hi", Text: "t"},
 			{From: &mail.Address{Name: "x\r\nBcc: y", Address: "a@shop.example"}, To: "a@example.com", Subject: "hi", Text: "t"},
+			{From: &mail.Address{Name: "No address"}, To: "a@example.com", Subject: "hi", Text: "t"},
 			{To: "a@example.com", Subject: "", Text: "t"},
 			{To: "a@example.com", Subject: "no body"},
 		} {

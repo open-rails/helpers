@@ -160,8 +160,11 @@ func (s *Sender) Send(ctx context.Context, m Message) error {
 	if from == nil {
 		return errors.New("smtp: the message has no sender and Config.From is empty")
 	}
-	if strings.ContainsAny(from.Name+from.Address, "\r\n") {
+	if strings.ContainsAny(from.Name, "\r\n") {
 		return errors.New("smtp: from contains a line break")
+	}
+	if _, err := ParseMailbox(from.Address); err != nil {
+		return fmt.Errorf("smtp: from: %w", err)
 	}
 	to, err := ParseMailbox(m.To)
 	if err != nil {
