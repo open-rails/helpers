@@ -7,6 +7,7 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | `github.com/open-rails/helpers/api` | HTTP errors, responses, safe metadata and pagination | Standard library |
 | `github.com/open-rails/helpers/auth` | Request identity (subject, invoker, credential), optional permission and recent sign-in capabilities, and the `Auth` middleware contract | Standard library |
 | `github.com/open-rails/helpers/contacts` | The host directory's contact lookup (`Source`) and its conformance check (`contactstest`) | Standard library |
+| `github.com/open-rails/helpers/smtp` | Send email through any SMTP server (`smtptest`: an in-process server for end-to-end tests) | Standard library |
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
 | `github.com/open-rails/helpers/river` | Initialize River tables and compose one host-owned client | River and pgx |
 | `github.com/open-rails/helpers/deps` | Dependency supervision, Redis client, fallback switch, probe/status/metrics handlers | go-redis |
@@ -24,6 +25,12 @@ Consumers define their own `AuthenticateRequest(context.Context, *http.Request) 
 ## Contacts
 
 `contacts.Source` is the host's directory read in process, so a library (OpenRails) reaches people without importing the host (AuthKit) or copying its data. `Contacts(ctx, ids)` returns each held id's `Contact` (`ID`, the subject the host's auth reports; `Email`, `Name`, `Username`); an id the directory does not hold is absent, not an error. `SearchContacts(ctx, query, limit)` returns up to `limit` contacts whose email, username or name contains `query` as literal text, ignoring case. Values are current at read time; the caller keeps no copy. A host checks its implementation in its own CI with `contactstest.Check(t, src, contactstest.Fixtures{...})`, giving people its directory holds, optionally ids it does not hold and a `Change` hook that proves reads are current.
+
+## SMTP
+
+`smtp.New(smtp.Config{Host, Port, Username, Password, From})` returns a `Sender`, so the email provider is configuration: SendGrid is `smtp.sendgrid.net:587` with username `apikey` and an API key with `mail.send` as the password; ZeptoMail, SES or a self-hosted server are another host. Port 465 is TLS from the first byte; any other port (0 is 587) upgrades with STARTTLS when offered, and must before credentials go to a host other than loopback. Authentication is PLAIN, else LOGIN. `From` is one RFC 5322 mailbox (`"Shop <noreply@shop.example>"`); a `Message` may carry its own. `Send(ctx, Message{To, Subject, Text, HTML})` opens one connection per message (safe for concurrent use), bounded by `ctx` and `Timeout` (30s), and writes a multipart/alternative message with `Date`, `Message-ID` and encoded headers; a refusal wraps the server's `*textproto.Error`. `CheckHealth` connects, negotiates TLS and authenticates without sending. No error carries the password. Applications name the settings `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD` and `EMAIL_SMTP_FROM`.
+
+`smtptest.Start(t, smtptest.Options{...})` runs an SMTP server on 127.0.0.1 that captures and decodes what it receives (`Wait`, `Messages`), optionally requiring credentials, offering STARTTLS or speaking implicit TLS with a certificate `ClientTLS` trusts, and refusing chosen recipients.
 
 ## River composition
 
