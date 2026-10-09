@@ -44,9 +44,9 @@ type Options struct {
 	STARTTLS bool
 	// ImplicitTLS speaks TLS from the first byte, like port 465.
 	ImplicitTLS bool
-	// Refuse, when it returns a non-empty reply ("550 5.1.1 no such user"),
-	// refuses that recipient with it.
-	Refuse func(recipient string) string
+	// RefuseRecipient, when it returns a non-empty reply ("550 5.1.1 no
+	// such user"), refuses that recipient with it.
+	RefuseRecipient func(recipient string) string
 }
 
 // Message is one delivered email, decoded.
@@ -81,6 +81,7 @@ type Server struct {
 	roots    *x509.CertPool
 	mu       sync.Mutex
 	messages []Message
+	outage   string
 	arrived  chan struct{}
 	conns    map[net.Conn]struct{}
 	wg       sync.WaitGroup
@@ -159,6 +160,15 @@ func (s *Server) Wait(t testing.TB, n int, timeout time.Duration) []Message {
 	}
 }
 
+// Outage answers every new connection's greeting with reply and hangs up,
+// as a provider that is down or refuses this client ("421 4.3.2 service
+// unavailable"); "" serves normally again.
+func (s *Server) Outage(reply string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.outage = reply
+}
+
 // Close stops the server and ends its connections.
 func (s *Server) Close() {
 	_ = s.ln.Close()
@@ -208,6 +218,13 @@ type session struct {
 func (s *Server) serve(c net.Conn) {
 	_ = c.SetDeadline(time.Now().Add(time.Minute))
 	ss := &session{s: s, conn: c, text: textproto.NewConn(c), tls: s.opts.ImplicitTLS}
+	s.mu.Lock()
+	outage := s.outage
+	s.mu.Unlock()
+	if outage != "" {
+		ss.reply("%s", outage)
+		return
+	}
 	ss.reply("220 smtptest ESMTP")
 	for {
 		line, err := ss.text.ReadLine()
@@ -274,8 +291,8 @@ func (ss *session) handle(verb, arg string) bool {
 			return true
 		}
 		to := path(arg, "TO:")
-		if ss.s.opts.Refuse != nil {
-			if r := ss.s.opts.Refuse(to); r != "" {
+		if ss.s.opts.RefuseRecipient != nil {
+			if r := ss.s.opts.RefuseRecipient(to); r != "" {
 				ss.reply("%s", r)
 				return true
 			}

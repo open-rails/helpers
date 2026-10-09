@@ -140,7 +140,7 @@ func TestRefusals(t *testing.T) {
 		}
 	})
 	t.Run("refused recipient keeps its code", func(t *testing.T) {
-		srv := smtptest.Start(t, smtptest.Options{Refuse: func(string) string { return "550 5.1.1 no such user" }})
+		srv := smtptest.Start(t, smtptest.Options{RefuseRecipient: func(string) string { return "550 5.1.1 no such user" }})
 		err := sender(t, srv, smtp.Config{}).Send(ctx, smtp.Message{To: "a@example.com", Subject: "s", Text: "t"})
 		var tp *textproto.Error
 		if !errors.As(err, &tp) || tp.Code != 550 {
@@ -186,6 +186,19 @@ func TestRefusals(t *testing.T) {
 		}
 		if err := s.CheckHealth(ctx); err == nil || !strings.Contains(err.Error(), "cleartext") {
 			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("outage fails health until it ends", func(t *testing.T) {
+		srv := smtptest.Start(t, smtptest.Options{Username: "apikey", Password: password, STARTTLS: true})
+		s := sender(t, srv, smtp.Config{Username: "apikey", Password: password})
+		srv.Outage("421 4.3.2 service unavailable")
+		var tp *textproto.Error
+		if err := s.CheckHealth(ctx); !errors.As(err, &tp) || tp.Code != 421 {
+			t.Fatalf("got %v", err)
+		}
+		srv.Outage("")
+		if err := s.CheckHealth(ctx); err != nil {
+			t.Fatal(err)
 		}
 	})
 	t.Run("header injection", func(t *testing.T) {
