@@ -13,17 +13,6 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
-    # Docker official images from ECR Public: Docker Hub rate-limits anonymous
-    # pulls.
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:18-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: helpers_test
-        ports: ['5432:5432']
-        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       GOWORK: 'off'
       GOMAXPROCS: '2'
@@ -34,6 +23,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      # Docker Hub rate-limits anonymous pulls: scripts/ci-pull-image.sh pulls
+      # the official images from its mirrors, with retries. Steps, not
+      # services, so a failed pull is retried.
+      - name: Start PostgreSQL
+        run: |
+          image="$(scripts/ci-pull-image.sh postgres:18-alpine)"
+          docker run -d --pull never --name postgres -p 127.0.0.1:5432:5432 \
+            -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=helpers_test "$image"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           # Build and scan on the latest patched Go 1.26; go.mod keeps 1.26.6
@@ -44,9 +41,10 @@ jobs:
           node-version: '24'
       - name: Start Redis and Sentinel
         run: |
-          docker run -d --name redis -p 127.0.0.1:6379:6379 public.ecr.aws/docker/library/redis:8-alpine
+          image="$(scripts/ci-pull-image.sh redis:8-alpine)"
+          docker run -d --pull never --name redis -p 127.0.0.1:6379:6379 "$image"
           ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' redis)"
-          docker run -d --name sentinel -p 127.0.0.1:26379:26379 --entrypoint sh public.ecr.aws/docker/library/redis:8-alpine -c \
+          docker run -d --pull never --name sentinel -p 127.0.0.1:26379:26379 --entrypoint sh "$image" -c \
             "printf 'port 26379\nsentinel monitor mymaster $ip 6379 1\n' > /tmp/s.conf && exec redis-sentinel /tmp/s.conf"
           for i in $(seq 1 30); do
             docker exec sentinel redis-cli -p 26379 sentinel get-master-addr-by-name mymaster | grep -q "$ip" && exit 0
@@ -54,6 +52,8 @@ jobs:
           done
           docker logs sentinel
           exit 1
+      - name: Wait for PostgreSQL
+        run: timeout 60 bash -c 'until docker exec postgres pg_isready -h 127.0.0.1 -U postgres -d helpers_test; do sleep 1; done'
       - run: bash scripts/check.sh
   injection-scan:
     uses: ./.github/workflows/injection-scan.yml
