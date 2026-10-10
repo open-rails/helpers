@@ -5,7 +5,7 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | Import | Purpose | Runtime dependencies |
 | --- | --- | --- |
 | `github.com/open-rails/helpers/api` | HTTP errors, responses, safe metadata and pagination | Standard library |
-| `github.com/open-rails/helpers/auth` | Request identity (subject, invoker, credential), optional permission and recent sign-in capabilities, and the `Auth` middleware contract | Standard library |
+| `github.com/open-rails/helpers/auth` | The host's auth as a library takes it: `Authenticator`, the verified request's identity (subject, invoker, credential) and optional permission and recent sign-in checks, the standard refusal (`Refuse`), and its conformance check (`authtest`) | Standard library |
 | `github.com/open-rails/helpers/userinfo` | The host directory's user lookup (`Lookup`) and its conformance check (`userinfotest`) | Standard library |
 | `github.com/open-rails/helpers/smtp` | Send email through any SMTP server (`smtptest`: an in-process server for end-to-end tests) | Standard library |
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
@@ -18,9 +18,22 @@ Import only the packages an application needs. The API core does not import Gin 
 
 The core provides typed errors, stable type/code fields, optional request IDs, bounded/sanitized metadata, JSON writers and generic list/message/deletion responses. The Gin adapter delegates to those writers and adds pagination binding and locale middleware. It does not add a router or authentication system. Existing response bytes are retained, including omitted codes/discriminators and preserved request IDs.
 
-## Authentication values
+## Authentication
 
-Consumers define their own `AuthenticateRequest(context.Context, *http.Request) (auth.Verified, error)` interface. A provider returns the verified identity for that request: the native account whose authority it uses (`Subject` within `Issuer`, a `user` or an `application`), who actually acts (`Invoker`: the subject itself, or someone acting on its behalf, possibly foreign), and how it was proven (`Credential`: a session, device key, API key, signed token or access token). Authorization is the subject's, limits are per invoker within it, and audit records all three; a credential is never the subject; an optional `auth.PermissionChecker` on the verified request checks a host-resolved immutable scope and permission without verifying sender proof again. Identity-only providers implement only `Identity() auth.Identity`. Missing permission capability denies privileged access. An error from `Can` never grants: `ErrExpired` or `ErrRevoked` is a credential failure (401), anything else an unavailable check (503). An optional `auth.RecentSignInChecker` answers whether a user's sign-in is recent enough for an action that moves money or grants access; `ErrStepUpRequired` asks the user to sign in again, and a request without the capability is refused those actions. `auth.Auth` is the provider as a library that serves a merchant's routes (OpenRails) mounts it: `Required` (a person signed in, live), `RequirePermission` (exactly one permission in the group that controls the merchant, live), `Sensitive` (a recent sign-in) and `Identity`, the identity the gates verified. A credential's bounds (its session, ceiling) are the provider's opaque `Credential.State`, which encoding drops: an `Identity` built or decoded from data grants nothing. Account mapping, routes, issuer configuration, verification and authorization policy stay with the provider or host.
+`auth.Authenticator` is a host's auth as a library (OpenRails) takes it to guard its own routes. The host only says who a request is; the library builds its gates, so the host writes no middleware.
+
+`Authenticate(r)` verifies the request's credential live (a revoked sign-in, banned or deleted account is refused) and returns its `Verified`: `Identity()` is the native account whose authority it uses (`Subject` within `Issuer`, a `user` or an `application`), who actually acts (`Invoker`: the subject itself, or someone acting on its behalf) and how it was proven (`Credential`: a session, device key, API key, signed token or access token; never the subject). A credential's bounds are the provider's opaque `Credential.State`, which encoding drops, so an `Identity` built or decoded from data grants nothing. A consumer calls `Authenticate` once per request and keeps the `Verified` for that request alone.
+
+Two optional capabilities of a `Verified` carry authority, and their absence denies:
+
+- `Can(ctx, scope, permission)`: exactly that permission in exactly that `Scope` (`{Authority, ID}`, such as the group that administers a merchant), checked live.
+- `CheckRecentSignIn(ctx)`: nil when a person signed in recently enough to move money or grant access; `ErrStepUpRequired` asks them to sign in again (an `*auth.Challenge` gives `MaxAge` and the provider's `Metadata`); `ErrForbidden` for a credential with no sign-in of its own.
+
+An `Authenticator` may also implement `PermissionCatalog` (`KnownPermission`), so a library refuses a misspelled permission when it mounts.
+
+Errors classify with `errors.Is`: `ErrUnauthenticated` (with `ErrExpired`, `ErrRevoked` or `ErrSenderProofRequired`), `ErrForbidden`, `ErrStepUpRequired`, `ErrUnavailable`. `auth.Refuse(r, err)` is the answer every consumer gives: 401 with an RFC 6750 challenge (`DPoP` scheme for a DPoP-bound request), 401 `insufficient_user_authentication` with `max_age` for a step-up (RFC 9470), 403 for `ErrForbidden`, and 503 for `ErrUnavailable` or anything unclassified. A `Challenge`'s `Header` (a DPoP nonce) is set on it. Consumers write their own body and never show provider error text.
+
+A host checks its implementation in its own CI with `authtest.Check(t, authenticator, authtest.Cases{Scope, Permissions, Staff, User, ...})`: staff holding the permissions, a user holding none, optionally single-permission holders, a stale sign-in, an application, refused credentials and a `Revoke` hook. It fails on anything admitted that must be refused, any grant outside the exact scope and permission, an application reading as a person or as signed in, and an error that does not classify as the contract says.
 
 ## User info
 

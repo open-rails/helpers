@@ -11,10 +11,10 @@ mapfile -t modules < <(git ls-files --cached --others --exclude-standard -- go.m
 [[ -z "$(git ls-files --cached --others --exclude-standard -- go.work '**/go.work')" ]] || { echo "helpers must resolve without a workspace" >&2; exit 1; }
 [[ -z "$(git ls-files -z '*.go' | xargs -0 gofmt -l)" ]] || { echo "run gofmt on Go source" >&2; exit 1; }
 go mod tidy -diff
-core_deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./api ./auth ./userinfo/... ./smtp/...)"
+core_deps="$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./api ./auth/... ./userinfo/... ./smtp/...)"
 while IFS= read -r dep; do
   case "$dep" in
-    ''|github.com/open-rails/helpers/api|github.com/open-rails/helpers/auth|github.com/open-rails/helpers/userinfo|github.com/open-rails/helpers/userinfo/userinfotest|github.com/open-rails/helpers/smtp|github.com/open-rails/helpers/smtp/smtptest) ;;
+    ''|github.com/open-rails/helpers/api|github.com/open-rails/helpers/auth|github.com/open-rails/helpers/auth/authtest|github.com/open-rails/helpers/userinfo|github.com/open-rails/helpers/userinfo/userinfotest|github.com/open-rails/helpers/smtp|github.com/open-rails/helpers/smtp/smtptest) ;;
     *) echo "API/auth/userinfo/smtp core imports non-standard package: $dep" >&2; exit 1 ;;
   esac
 done <<< "$core_deps"
