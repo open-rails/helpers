@@ -32,8 +32,8 @@ type Authenticator interface {
 
 // Verified is one request's verified credential. A consumer keeps it only
 // for that request: never for another request, nor after the credential,
-// method or signed URL changes. It may implement PermissionChecker and
-// RecentSignInChecker; an identity-only provider implements neither.
+// method or signed URL changes. It may implement PermissionChecker,
+// RecentSignInChecker and Bound; an identity-only provider implements none.
 type Verified interface {
 	Identity() Identity
 }
@@ -80,6 +80,30 @@ type RecentSignInChecker interface {
 // refusing every request.
 type PermissionCatalog interface {
 	KnownPermission(permission string) bool
+}
+
+// Bound is an optional capability of a Verified request. BoundScope is the
+// one scope the credential acts in, such as a group's API key or service
+// token or a trusted issuer's token for its group, and the zero Scope when
+// it is bound to none, as a person's own sign-in is. A bound credential's
+// Can is false outside it. A consumer serving one scope's resources admits
+// there only a credential bound to that scope; without this capability a
+// credential is bound to none.
+type Bound interface {
+	BoundScope() Scope
+}
+
+// Headers is an optional capability of an Authenticator: the header names
+// its credentials use across origins. A consumer merges them into its CORS
+// lists, so it never names a provider's headers itself.
+type Headers interface {
+	// AllowedHeaders are the request headers a client sends credentials in
+	// (Access-Control-Allow-Headers), such as Authorization and DPoP.
+	AllowedHeaders() []string
+	// ExposedHeaders are the response headers a client reads
+	// (Access-Control-Expose-Headers), such as WWW-Authenticate and
+	// DPoP-Nonce: every header a Challenge of the provider carries.
+	ExposedHeaders() []string
 }
 
 // Failures are classified with errors.Is. Providers wrap their own errors in

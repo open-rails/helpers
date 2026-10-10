@@ -24,8 +24,9 @@ var (
 	support = auth.Scope{Authority: issuer, ID: "support"}
 )
 
-// shop is a host's own auth with no AuthKit: bearer sessions and API keys in
-// a table, grants per scope, all read live. It imports this package alone.
+// shop is a host's own auth with no AuthKit: bearer sessions, API keys bound
+// to a scope and a trusted issuer's tokens in a table, grants per scope, all
+// read live. It imports this package alone.
 type shop struct {
 	mu       sync.Mutex
 	creds    map[string]*cred
@@ -36,6 +37,7 @@ type shop struct {
 type cred struct {
 	identity auth.Identity
 	grants   map[auth.Scope][]string
+	bound    auth.Scope
 	signedIn time.Time // zero: no sign-in of its own
 	revoked  bool
 	nonce    bool // DPoP-bound: refused until it presents a nonce
@@ -49,13 +51,16 @@ func person(id, credential string, signedIn time.Time, grants map[auth.Scope][]s
 	}, grants: grants, signedIn: signedIn}
 }
 
+func application(id string, kind auth.CredentialKind, bound auth.Scope) *cred {
+	return &cred{identity: auth.Identity{
+		Issuer: issuer, Subject: id, SubjectKind: auth.SubjectApplication,
+		Invoker:    auth.Invoker{Issuer: issuer, ID: id},
+		Credential: auth.Credential{Kind: kind, ID: id},
+	}, grants: map[auth.Scope][]string{bound: {"billing:read", "billing:refund"}}, bound: bound}
+}
+
 func newShop() *shop {
 	now := time.Now()
-	app := &cred{identity: auth.Identity{
-		Issuer: issuer, Subject: "app-backend", SubjectKind: auth.SubjectApplication,
-		Invoker:    auth.Invoker{Issuer: issuer, ID: "app-backend"},
-		Credential: auth.Credential{Kind: auth.CredentialAPIKey, ID: "key-1"},
-	}, grants: map[auth.Scope][]string{billing: {"billing:read", "billing:refund"}}}
 	return &shop{creds: map[string]*cred{
 		"staff":    person("user-1", "s-1", now, map[auth.Scope][]string{billing: {"billing:read", "billing:refund"}}),
 		"customer": person("user-2", "s-2", now, nil),
@@ -64,9 +69,17 @@ func newShop() *shop {
 		"elsewhere": person("user-5", "s-5", now, map[auth.Scope][]string{
 			support: {"billing:read", "billing:refund"},
 		}),
-		"key-1":   app,
+		"key-1":   application("app-backend", auth.CredentialAPIKey, billing),
+		"key-2":   application("app-support", auth.CredentialAPIKey, support),
+		"service": application("app-service", auth.CredentialAccessToken, auth.Scope{}),
 		"revoked": func() *cred { c := person("user-6", "s-6", now, nil); c.revoked = true; return c }(),
-		"bound":   func() *cred { c := person("user-7", "s-7", now, nil); c.nonce = true; return c }(),
+		"dpop":    func() *cred { c := person("user-7", "s-7", now, nil); c.nonce = true; return c }(),
+		// a customer of billing's trusted issuer
+		"member": {identity: auth.Identity{
+			Issuer: "https://idp.example", Subject: "c-1", SubjectKind: auth.SubjectUser,
+			Invoker:    auth.Invoker{Issuer: "https://idp.example", ID: "c-1"},
+			Credential: auth.Credential{Kind: auth.CredentialAccessToken, ID: "jti-1"},
+		}, bound: billing, signedIn: now},
 	}}
 }
 
@@ -99,6 +112,9 @@ func (s *shop) KnownPermission(p string) bool {
 	return slices.Contains([]string{"billing:read", "billing:refund"}, p)
 }
 
+func (s *shop) AllowedHeaders() []string { return []string{"Authorization", "DPoP"} }
+func (s *shop) ExposedHeaders() []string { return []string{"WWW-Authenticate", "DPoP-Nonce"} }
+
 type verified struct {
 	shop *shop
 	c    *cred
@@ -117,6 +133,8 @@ func (v verified) Can(_ context.Context, scope auth.Scope, permission string) (b
 	}
 	return slices.Contains(v.c.grants[scope], permission), nil
 }
+
+func (v verified) BoundScope() auth.Scope { return v.c.bound }
 
 func (v verified) CheckRecentSignIn(context.Context) error {
 	switch {
@@ -148,6 +166,7 @@ type route struct {
 	permission  string // a staff route's
 	sensitive   bool   // moves money: a person must have signed in recently
 	application bool   // a backend's route: an application, never a person
+	bound       bool   // one scope's customer or backend route: a credential bound to it
 }
 
 // gate is the consumer's gate the package documents: authenticate once,
@@ -167,6 +186,12 @@ func gate(a auth.Authenticator, scope auth.Scope, rt route) http.Handler {
 		case rt.permission == "" && !rt.application && (id.SubjectKind != auth.SubjectUser || !id.SelfInvoked()):
 			refuse(w, r, auth.ErrForbidden)
 			return
+		}
+		if rt.bound {
+			if b, ok := v.(auth.Bound); !ok || b.BoundScope() != scope {
+				refuse(w, r, auth.ErrForbidden)
+				return
+			}
 		}
 		if rt.permission != "" {
 			pc, ok := v.(auth.PermissionChecker)
@@ -208,13 +233,36 @@ func refuse(w http.ResponseWriter, r *http.Request, err error) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"metadata": f.Metadata})
 }
 
+// cors is the consumer's CORS: its own headers and the provider's.
+func cors(a auth.Authenticator, next http.Handler) http.Handler {
+	allow, expose := []string{"Content-Type", "Idempotency-Key"}, []string{"Request-Id"}
+	if h, ok := a.(auth.Headers); ok {
+		allow = append(allow, h.AllowedHeaders()...)
+		expose = append(expose, h.ExposedHeaders()...)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") != "" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Expose-Headers", strings.Join(expose, ", "))
+			if r.Method == http.MethodOptions {
+				w.Header().Set("Access-Control-Allow-Headers", strings.Join(allow, ", "))
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func serve(a auth.Authenticator) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.Handle("GET /me", gate(a, billing, route{}))
 	mux.Handle("GET /admin/payments", gate(a, billing, route{permission: "billing:read"}))
 	mux.Handle("POST /admin/refunds", gate(a, billing, route{permission: "billing:refund", sensitive: true}))
 	mux.Handle("POST /app/usage", gate(a, billing, route{application: true}))
-	return httptest.NewServer(mux)
+	mux.Handle("GET /billing/me", gate(a, billing, route{bound: true}))
+	mux.Handle("POST /billing/app/usage", gate(a, billing, route{application: true, bound: true}))
+	return httptest.NewServer(cors(a, mux))
 }
 
 type answer struct {
@@ -254,7 +302,7 @@ func TestConsumerGatesOverAHostsOwnAuth(t *testing.T) {
 		{"anonymous", "GET", "/me", "", 401, "Bearer"},
 		{"unknown token", "GET", "/me", "Bearer forged", 401, `Bearer error="invalid_token"`},
 		{"revoked sign-in", "GET", "/me", "Bearer revoked", 401, `Bearer error="invalid_token"`},
-		{"DPoP-bound without a proof", "GET", "/me", "DPoP bound", 401, `DPoP error="use_dpop_nonce"`},
+		{"DPoP-bound without a proof", "GET", "/me", "DPoP dpop", 401, `DPoP error="use_dpop_nonce"`},
 		{"a customer, own route", "GET", "/me", "Bearer customer", 204, ""},
 		{"an application on a person's route", "GET", "/me", "Bearer key-1", 403, ""},
 		{"a customer on a staff route", "GET", "/admin/payments", "Bearer customer", 403, ""},
@@ -267,6 +315,11 @@ func TestConsumerGatesOverAHostsOwnAuth(t *testing.T) {
 		{"an application refunding", "POST", "/admin/refunds", "Bearer key-1", 204, ""},
 		{"an application on its route", "POST", "/app/usage", "Bearer key-1", 204, ""},
 		{"a person on an application's route", "POST", "/app/usage", "Bearer staff", 403, ""},
+		{"the scope's issuer's customer", "GET", "/billing/me", "Bearer member", 204, ""},
+		{"an own sign-in on a bound route", "GET", "/billing/me", "Bearer customer", 403, ""},
+		{"the scope's key", "POST", "/billing/app/usage", "Bearer key-1", 204, ""},
+		{"another scope's key", "POST", "/billing/app/usage", "Bearer key-2", 403, ""},
+		{"an unbound application", "POST", "/billing/app/usage", "Bearer service", 403, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := call(t, srv, c.method, c.path, c.credential)
@@ -307,6 +360,38 @@ func TestConsumerGatesOverAHostsOwnAuth(t *testing.T) {
 	})
 }
 
+// A browser on another origin sends the provider's credential headers and
+// reads its challenges, though the consumer names none of them.
+func TestCORSCarriesTheProvidersHeaders(t *testing.T) {
+	srv := serve(newShop())
+	defer srv.Close()
+	do := func(method string, header http.Header) *http.Response {
+		req, err := http.NewRequestWithContext(t.Context(), method, srv.URL+"/me", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header = header
+		res, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res
+	}
+	preflight := do(http.MethodOptions, http.Header{
+		"Origin": {"https://app.example"}, "Access-Control-Request-Method": {"GET"},
+		"Access-Control-Request-Headers": {"authorization,dpop"},
+	})
+	if got := preflight.Header.Get("Access-Control-Allow-Headers"); got != "Content-Type, Idempotency-Key, Authorization, DPoP" {
+		t.Fatalf("allowed %q", got)
+	}
+	res := do(http.MethodGet, http.Header{"Origin": {"https://app.example"}, "Authorization": {"DPoP dpop"}})
+	exposed := strings.Split(res.Header.Get("Access-Control-Expose-Headers"), ", ")
+	if res.StatusCode != 401 || res.Header.Get("DPoP-Nonce") != "n-1" || !slices.Contains(exposed, "DPoP-Nonce") || !slices.Contains(exposed, "WWW-Authenticate") {
+		t.Fatalf("%d nonce %q exposed %q", res.StatusCode, res.Header.Get("DPoP-Nonce"), exposed)
+	}
+}
+
 // Without Can a provider grants nothing; without CheckRecentSignIn a person
 // moves no money.
 func TestMissingCapabilitiesFailClosed(t *testing.T) {
@@ -339,7 +424,13 @@ func TestHostsOwnAuthConforms(t *testing.T) {
 		Holders:     map[string]func() *http.Request{"billing:read": req("reader")},
 		Stale:       req("stale"),
 		Application: req("key-1"),
-		Refused:     map[string]func() *http.Request{"forged": req("forged"), "revoked": req("revoked")},
+		Bound:       req("member"),
+		Foreign:     req("key-2"),
+		Refused: map[string]func() *http.Request{"forged": req("forged"), "revoked": req("revoked"), "DPoP-bound without a proof": func() *http.Request {
+			r := req("dpop")()
+			r.Header.Set("Authorization", "DPoP dpop")
+			return r
+		}},
 		Revoke: func() {
 			s.mu.Lock()
 			s.creds["staff"].revoked = true

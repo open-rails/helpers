@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -41,6 +42,14 @@ type Cases struct {
 	// token, a forged one, a signed-out session, a banned or deleted
 	// account's.
 	Refused map[string]func() *http.Request
+	// Bound is a credential bound to Scope (auth.Bound), such as the
+	// group's API key or a trusted issuer's token for it. Nil skips the
+	// case.
+	Bound func() *http.Request
+	// Foreign is a credential bound to another scope, such as another
+	// group's API key; it holds none of Permissions in Scope. Nil skips the
+	// case.
+	Foreign func() *http.Request
 	// Revoke ends the sign-in behind Staff's credential, as signing out
 	// does. Check calls it last; Authenticate must then refuse Staff. Nil
 	// skips the case.
@@ -52,10 +61,14 @@ const unknownPermission = "authtest:unknown:permission"
 // Check fails t when a admits what it must refuse: an anonymous request or
 // a Refused credential, a permission to someone who does not hold it, in a
 // scope it was not granted in, or for a pattern; a stale sign-in as recent;
-// an application as a person or as signed in. It fails when a refuses Staff,
-// User, a Holder or Application, so a check cannot pass vacuously, and when
-// an error classifies as anything but the contract says (auth.Refuse), so
-// every consumer answers it the same.
+// an application as a person or as signed in; a credential bound to one
+// scope as bound to another, or holding a permission outside it. With
+// auth.Headers, it fails when a header Staff's credential is sent in is not
+// allowed, or a header a refusal's Challenge carries is not exposed. It
+// fails when a refuses Staff, User, a Holder, Application, Bound or Foreign,
+// so a check cannot pass vacuously, and when an error classifies as anything
+// but the contract says (auth.Refuse), so every consumer answers it the
+// same.
 func Check(t testing.TB, a auth.Authenticator, c Cases) {
 	t.Helper()
 	if a == nil || c.Scope.Authority == "" || c.Scope.ID == "" || len(c.Permissions) == 0 || c.Staff == nil || c.User == nil {
@@ -70,7 +83,7 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 		}
 		held[p] = true
 	}
-	ch := checker{t: t, a: a, scope: c.Scope, permission: c.Permissions[0]}
+	ch := checker{t: t, a: a, scope: c.Scope, permission: c.Permissions[0], challenged: map[string]bool{}}
 
 	ch.refused("an anonymous request", func() *http.Request {
 		r := c.Staff()
@@ -129,6 +142,22 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 			}
 		}
 	}
+	if c.Bound != nil {
+		if v, ok := ch.admitted("Bound", c.Bound); ok {
+			if got, ok := ch.bound("Bound", v); ok && got != c.Scope {
+				t.Errorf("authtest: Bound's BoundScope is %+v, not Scope %+v", got, c.Scope)
+			}
+			ch.notGranted("Bound", v)
+		}
+	}
+	if c.Foreign != nil {
+		if v, ok := ch.admitted("Foreign", c.Foreign); ok {
+			if got, ok := ch.bound("Foreign", v); ok && (got == auth.Scope{} || got == c.Scope) {
+				t.Errorf("authtest: Foreign's BoundScope is %+v; it is bound to a scope other than Scope %+v", got, c.Scope)
+			}
+			ch.lacks("Foreign", v, c.Permissions)
+		}
+	}
 	if catalog, ok := a.(auth.PermissionCatalog); ok {
 		for _, p := range c.Permissions {
 			if !catalog.KnownPermission(p) {
@@ -138,6 +167,11 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 		if catalog.KnownPermission(unknownPermission) {
 			t.Errorf("authtest: KnownPermission(%q) is true", unknownPermission)
 		}
+	}
+
+	headers, _ := a.(auth.Headers)
+	if headers != nil {
+		ch.sentIn(headers, c.Staff)
 	}
 
 	errs := make([]error, 8)
@@ -163,6 +197,14 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 		c.Revoke()
 		ch.refused("Staff after Revoke", c.Staff, http.StatusUnauthorized)
 	}
+	if headers != nil {
+		exposed := ch.names("ExposedHeaders", headers.ExposedHeaders())
+		for _, name := range sortedKeys(ch.challenged) {
+			if !exposed[name] {
+				t.Errorf("authtest: a refusal's Challenge carries %s, which ExposedHeaders does not name", name)
+			}
+		}
+	}
 }
 
 type checker struct {
@@ -171,6 +213,8 @@ type checker struct {
 	scope auth.Scope
 	// permission is one every holder of all of them holds in scope.
 	permission string
+	// challenged are the headers the refusals' Challenges carried.
+	challenged map[string]bool
 }
 
 // admitted requires Authenticate to admit req, with a whole identity.
@@ -185,7 +229,7 @@ func (c checker) admitted(name string, req func() *http.Request) (auth.Verified,
 		c.t.Errorf("authtest: Authenticate admitted %s with no Verified", name)
 		return nil, false
 	}
-	id := v.Identity()
+	id, bound := v.Identity(), boundScope(v)
 	switch {
 	case id.Issuer == "" || id.Subject == "" || id.Credential.Kind == "":
 		c.t.Errorf("authtest: %s's Identity names no Issuer, Subject or Credential kind: %+v", name, id)
@@ -193,6 +237,8 @@ func (c checker) admitted(name string, req func() *http.Request) (auth.Verified,
 		c.t.Errorf("authtest: %s's Identity is SubjectKind %q, neither a user nor an application", name, id.SubjectKind)
 	case id.Invoker.Issuer == "" || id.Invoker.ID == "":
 		c.t.Errorf("authtest: %s's Identity names no Invoker; a subject acting itself is its own", name)
+	case bound != auth.Scope{} && (bound.Authority == "" || bound.ID == ""):
+		c.t.Errorf("authtest: %s's BoundScope is %+v; a scope is whole or zero", name, bound)
 	default:
 		return v, true
 	}
@@ -218,6 +264,7 @@ func (c checker) refused(name string, req func() *http.Request, statuses ...int)
 	c.t.Helper()
 	r := req()
 	v, err := c.a.Authenticate(r)
+	c.challenge(err)
 	switch status := auth.Refuse(r, err).Status; {
 	case err == nil:
 		c.t.Errorf("authtest: Authenticate admitted %s", name)
@@ -247,6 +294,9 @@ func (c checker) holds(name string, v auth.Verified, permissions []string) {
 		if ok, err := c.can(v, c.scope, p); !ok || err != nil {
 			c.t.Errorf("authtest: Can(%+v, %q) refused %s: %v", c.scope, p, name, err)
 		}
+	}
+	if b := boundScope(v); b != (auth.Scope{}) && b != c.scope {
+		c.t.Errorf("authtest: %s is bound to %+v but holds permissions in %+v; a bound credential holds nothing outside its scope", name, b, c.scope)
 	}
 }
 
@@ -294,6 +344,7 @@ func (c checker) stale(v auth.Verified, req func() *http.Request) {
 		return
 	}
 	err := rs.CheckRecentSignIn(c.t.Context())
+	c.challenge(err)
 	if !errors.Is(err, auth.ErrStepUpRequired) {
 		c.t.Errorf("authtest: CheckRecentSignIn answered %v for Stale, not auth.ErrStepUpRequired", err)
 		return
@@ -301,6 +352,97 @@ func (c checker) stale(v auth.Verified, req func() *http.Request) {
 	if refusal := auth.Refuse(req(), err); refusal.Status != http.StatusUnauthorized {
 		c.t.Errorf("authtest: Stale's step-up %v answers %d, not 401", err, refusal.Status)
 	}
+}
+
+func boundScope(v auth.Verified) auth.Scope {
+	if b, ok := v.(auth.Bound); ok {
+		return b.BoundScope()
+	}
+	return auth.Scope{}
+}
+
+// bound requires v to report its bound scope.
+func (c checker) bound(name string, v auth.Verified) (auth.Scope, bool) {
+	c.t.Helper()
+	b, ok := v.(auth.Bound)
+	if !ok {
+		c.t.Errorf("authtest: %s's Verified has no BoundScope", name)
+		return auth.Scope{}, false
+	}
+	return b.BoundScope(), true
+}
+
+// challenge records the headers err's Challenge carries.
+func (c checker) challenge(err error) {
+	var ch *auth.Challenge
+	if errors.As(err, &ch) {
+		for name := range ch.Header {
+			c.challenged[http.CanonicalHeaderKey(name)] = true
+		}
+	}
+}
+
+// sentIn requires AllowedHeaders to name every header of a Staff request
+// without which Authenticate refuses it, but those a browser or proxy sets.
+func (c checker) sentIn(h auth.Headers, staff func() *http.Request) {
+	c.t.Helper()
+	allowed := c.names("AllowedHeaders", h.AllowedHeaders())
+	for _, name := range sortedKeys(staff().Header) {
+		name = http.CanonicalHeaderKey(name)
+		if notCORS(name) {
+			continue
+		}
+		r := staff()
+		r.Header.Del(name)
+		if _, err := c.a.Authenticate(r); err != nil {
+			c.challenge(err)
+			if !allowed[name] {
+				c.t.Errorf("authtest: Staff's credential is sent in %s, which AllowedHeaders does not name", name)
+			}
+		}
+	}
+}
+
+// names is a Headers list as a set, requiring each to be a header name.
+func (c checker) names(list string, names []string) map[string]bool {
+	c.t.Helper()
+	out := map[string]bool{}
+	for _, name := range names {
+		if !isToken(name) {
+			c.t.Errorf("authtest: %s names %q, not a header name", list, name)
+			continue
+		}
+		out[http.CanonicalHeaderKey(name)] = true
+	}
+	return out
+}
+
+// notCORS reports a header a browser sets itself (the Fetch standard's
+// forbidden request headers) or a proxy sets, never one a client allows.
+func notCORS(name string) bool {
+	switch name {
+	case "Accept-Charset", "Accept-Encoding", "Access-Control-Request-Headers", "Access-Control-Request-Method",
+		"Connection", "Content-Length", "Cookie", "Cookie2", "Date", "Dnt", "Expect", "Host", "Keep-Alive",
+		"Origin", "Referer", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade", "Via",
+		"Forwarded", "X-Real-Ip":
+		return true
+	}
+	return strings.HasPrefix(name, "Proxy-") || strings.HasPrefix(name, "Sec-") || strings.HasPrefix(name, "X-Forwarded-")
+}
+
+// isToken reports an RFC 9110 field name.
+func isToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9', strings.ContainsRune("!#$%&'*+-.^_`|~", r):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func sortedKeys[V any](m map[string]V) []string {

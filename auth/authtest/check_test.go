@@ -17,7 +17,10 @@ import (
 
 const issuer = "https://host.example"
 
-var scope = auth.Scope{Authority: issuer, ID: "merchant-1"}
+var (
+	scope = auth.Scope{Authority: issuer, ID: "merchant-1"}
+	other = auth.Scope{Authority: issuer, ID: "merchant-2"}
+)
 
 var perms = []string{"billing:read", "billing:refund"}
 
@@ -44,13 +47,24 @@ type host struct {
 	noInvoker         bool // Identity names no invoker
 	notLive           bool // a revoked sign-in is still admitted
 	knowsEverything   bool // KnownPermission is always true
+	noBound           bool // Verified has no BoundScope
+	boundElsewhere    bool // a credential bound to scope reports other
+	foreignHere       bool // a credential bound to other reports scope
+	halfBound         bool // a bound scope names no authority
+	sessionsBound     bool // sessions report other as their bound scope
+	dpopNotAllowed    bool // AllowedHeaders omits DPoP
+	nonceNotExposed   bool // ExposedHeaders omits DPoP-Nonce
+	badHeaderName     bool // AllowedHeaders names a list, not a header
 }
 
 type cred struct {
 	id       auth.Identity
 	grants   []string
+	in       auth.Scope // where grants are held: scope when zero
+	bound    auth.Scope
 	signedIn time.Time
 	revoked  bool
+	proof    bool // DPoP-bound: refused without a proof
 }
 
 func newHost() *host {
@@ -61,17 +75,29 @@ func newHost() *host {
 			Credential: auth.Credential{Kind: auth.CredentialSession, ID: "s-" + id},
 		}, grants: grants, signedIn: signedIn}
 	}
+	app := func(id, key string, bound auth.Scope) *cred {
+		return &cred{id: auth.Identity{
+			Issuer: issuer, Subject: id, SubjectKind: auth.SubjectApplication,
+			Invoker:    auth.Invoker{Issuer: issuer, ID: id},
+			Credential: auth.Credential{Kind: auth.CredentialAPIKey, ID: key},
+		}, grants: perms, in: bound, bound: bound}
+	}
 	now := time.Now()
+	staff := user("u-staff", now, perms...)
+	staff.proof = true
 	return &host{creds: map[string]*cred{
-		"staff":    user("u-staff", now, perms...),
+		"staff":    staff,
 		"customer": user("u-customer", now),
 		"reader":   user("u-reader", now, "billing:read"),
 		"stale":    user("u-stale", now.Add(-time.Hour), perms...),
-		"key": {id: auth.Identity{
-			Issuer: issuer, Subject: "app-1", SubjectKind: auth.SubjectApplication,
-			Invoker:    auth.Invoker{Issuer: issuer, ID: "app-1"},
-			Credential: auth.Credential{Kind: auth.CredentialAPIKey, ID: "key-1"},
-		}, grants: perms},
+		"key":      app("app-1", "key-1", scope),
+		"other":    app("app-2", "key-2", other),
+		// a trusted issuer's customer token, bound to its group
+		"member": {id: auth.Identity{
+			Issuer: "https://issuer.example", Subject: "c-1", SubjectKind: auth.SubjectUser,
+			Invoker:    auth.Invoker{Issuer: "https://issuer.example", ID: "c-1"},
+			Credential: auth.Credential{Kind: auth.CredentialAccessToken, ID: "jti-1"},
+		}, bound: scope, signedIn: now},
 	}}
 }
 
@@ -85,7 +111,10 @@ func (h *host) refusal(err error) error {
 func (h *host) Authenticate(r *http.Request) (auth.Verified, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	token := ""
+	if fields := strings.Fields(r.Header.Get("Authorization")); len(fields) == 2 {
+		token = fields[1]
+	}
 	c, ok := h.creds[token]
 	switch {
 	case token == "" && h.anonymousAdmitted, !ok && token != "" && h.forgedAdmitted:
@@ -97,6 +126,12 @@ func (h *host) Authenticate(r *http.Request) (auth.Verified, error) {
 		return nil, h.refusal(auth.ErrUnauthenticated)
 	case c.revoked && !h.notLive:
 		return nil, h.refusal(errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked))
+	// the proof's URL is https, behind a proxy terminating TLS
+	case c.proof && (r.Header.Get("DPoP") == "" || r.Header.Get("X-Forwarded-Proto") != "https"):
+		return nil, &auth.Challenge{
+			Err:    errors.Join(auth.ErrUnauthenticated, auth.ErrSenderProofRequired),
+			Header: http.Header{"WWW-Authenticate": {`DPoP error="use_dpop_nonce"`}, "DPoP-Nonce": {"n-1"}},
+		}
 	}
 	return h.verified(c), nil
 }
@@ -111,6 +146,8 @@ func (h *host) verified(c *cred) auth.Verified {
 	}
 	base := verified{h: h, c: c, id: id}
 	switch {
+	case h.noBound:
+		return unbound{base}
 	case h.noCan:
 		return identityOnly{base}
 	case h.noRecentSignIn:
@@ -120,6 +157,23 @@ func (h *host) verified(c *cred) auth.Verified {
 }
 
 func (h *host) KnownPermission(p string) bool { return h.knowsEverything || slices.Contains(perms, p) }
+
+func (h *host) AllowedHeaders() []string {
+	switch {
+	case h.dpopNotAllowed:
+		return []string{"Authorization"}
+	case h.badHeaderName:
+		return []string{"Authorization, DPoP"}
+	}
+	return []string{"Authorization", "DPoP"}
+}
+
+func (h *host) ExposedHeaders() []string {
+	if h.nonceNotExposed {
+		return []string{"WWW-Authenticate"}
+	}
+	return []string{"WWW-Authenticate", "DPoP-Nonce"}
+}
 
 type verified struct {
 	h  *host
@@ -136,10 +190,30 @@ func (v verified) Can(_ context.Context, s auth.Scope, p string) (bool, error) {
 		return true, nil
 	case h.patterns && strings.HasSuffix(p, "*"):
 		return slices.ContainsFunc(v.c.grants, func(g string) bool { return strings.HasPrefix(g, strings.TrimSuffix(p, "*")) }), nil
-	case h.scopeIgnored, h.authorityIgnored && s.ID == scope.ID, s == scope:
+	}
+	in := v.c.in
+	if in == (auth.Scope{}) {
+		in = scope
+	}
+	if h.scopeIgnored || h.authorityIgnored && s.ID == in.ID || s == in {
 		return slices.Contains(v.c.grants, p), nil
 	}
 	return false, nil
+}
+
+func (v verified) BoundScope() auth.Scope {
+	h, b := v.h, v.c.bound
+	switch {
+	case h.sessionsBound && v.c.id.Credential.Kind == auth.CredentialSession:
+		return other
+	case h.boundElsewhere && b == scope:
+		return other
+	case h.foreignHere && b == other:
+		return scope
+	case h.halfBound && b != auth.Scope{}:
+		return auth.Scope{ID: b.ID}
+	}
+	return b
 }
 
 func (v verified) CheckRecentSignIn(context.Context) error {
@@ -154,6 +228,15 @@ func (v verified) CheckRecentSignIn(context.Context) error {
 	}
 	return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute}
 }
+
+// unbound is a Verified without BoundScope.
+type unbound struct{ v verified }
+
+func (u unbound) Identity() auth.Identity { return u.v.Identity() }
+func (u unbound) Can(ctx context.Context, s auth.Scope, p string) (bool, error) {
+	return u.v.Can(ctx, s, p)
+}
+func (u unbound) CheckRecentSignIn(ctx context.Context) error { return u.v.CheckRecentSignIn(ctx) }
 
 type canOnly struct{ v verified }
 
@@ -177,11 +260,19 @@ func (h *host) cases() authtest.Cases {
 	return authtest.Cases{
 		Scope:       scope,
 		Permissions: perms,
-		Staff:       req("staff"),
+		Staff: func() *http.Request {
+			r := req("staff")()
+			r.Header.Set("Authorization", "DPoP staff")
+			r.Header.Set("DPoP", "proof")
+			r.Header.Set("X-Forwarded-Proto", "https")
+			return r
+		},
 		User:        req("customer"),
 		Holders:     map[string]func() *http.Request{"billing:read": req("reader")},
 		Stale:       req("stale"),
 		Application: req("key"),
+		Bound:       req("member"),
+		Foreign:     req("other"),
 		Refused:     map[string]func() *http.Request{"forged": req("forged")},
 		Revoke: func() {
 			h.mu.Lock()
@@ -207,6 +298,17 @@ func TestCheckPassesAConformingAuthenticator(t *testing.T) {
 	authtest.Check(t, h, h.cases())
 }
 
+// noHeaders hides the host's Headers: the capability is optional.
+type noHeaders struct{ h *host }
+
+func (n noHeaders) Authenticate(r *http.Request) (auth.Verified, error) { return n.h.Authenticate(r) }
+
+func TestCheckPassesWithoutHeaders(t *testing.T) {
+	h := newHost()
+	h.nonceNotExposed, h.dpopNotAllowed = true, true
+	authtest.Check(t, noHeaders{h}, h.cases())
+}
+
 func TestCheckCatchesABrokenAuthenticator(t *testing.T) {
 	for name, c := range map[string]struct {
 		breakIt func(*host)
@@ -229,6 +331,14 @@ func TestCheckCatchesABrokenAuthenticator(t *testing.T) {
 		"no invoker":                {func(h *host) { h.noInvoker = true }, "names no Invoker"},
 		"not live":                  {func(h *host) { h.notLive = true }, "admitted %s"},
 		"knows every permission":    {func(h *host) { h.knowsEverything = true }, "KnownPermission(%q) is true"},
+		"no BoundScope":             {func(h *host) { h.noBound = true }, "has no BoundScope"},
+		"bound elsewhere":           {func(h *host) { h.boundElsewhere = true }, "not Scope"},
+		"a foreign key bound here":  {func(h *host) { h.foreignHere = true }, "a scope other than Scope"},
+		"half a bound scope":        {func(h *host) { h.halfBound = true }, "whole or zero"},
+		"sessions bound elsewhere":  {func(h *host) { h.sessionsBound = true }, "nothing outside its scope"},
+		"DPoP not allowed":          {func(h *host) { h.dpopNotAllowed = true }, "AllowedHeaders does not name"},
+		"nonce not exposed":         {func(h *host) { h.nonceNotExposed = true }, "ExposedHeaders does not name"},
+		"a list as a header name":   {func(h *host) { h.badHeaderName = true }, "not a header name"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHost()
