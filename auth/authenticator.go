@@ -51,8 +51,9 @@ type Scope struct {
 // PermissionChecker is an optional capability of a Verified request. Can
 // reports whether the request holds exactly permission (never a pattern) in
 // exactly scope, checked live and without verifying the request again: a
-// scope of another authority, or of a group the credential is not bound to,
-// is false, and the credential's ceilings hold. Consumers deny privileged
+// scope of another authority, or outside the scope the credential is bound
+// to (Bound, with its one exception), is false, and the credential's
+// ceilings hold. Consumers deny privileged
 // access without this capability; identity metadata never implies a grant.
 // An error never grants: one matching ErrExpired or ErrRevoked (with
 // ErrUnauthenticated) means the credential ended after the request was
@@ -85,11 +86,15 @@ type PermissionCatalog interface {
 
 // Bound is an optional capability of a Verified request. BoundScope is the
 // one scope the credential acts in, such as a group's API key or service
-// token or a trusted issuer's token for its group, and the zero Scope when
-// it is bound to none, as a person's own sign-in is. A bound credential's
-// Can is false outside it. A consumer serving one scope's resources admits
-// there only a credential bound to that scope; without this capability a
-// credential is bound to none.
+// token, a trusted issuer's token for its group, or a person's token
+// exchanged for one group, and the zero Scope when it is bound to none, as a
+// person's own sign-in is. A bound credential's Can is false outside it, with
+// one exception: a person's (SubjectUser) may also hold, in the
+// Authenticator's RootScope (Root), the root: permissions the person holds
+// there, since a person keeps their root role whatever group a token names.
+// An application's is false everywhere else. A consumer serving one scope's
+// resources admits there only a credential bound to that scope; without
+// this capability a credential is bound to none.
 type Bound interface {
 	BoundScope() Scope
 }

@@ -55,6 +55,8 @@ type host struct {
 	dpopNotAllowed    bool // AllowedHeaders omits DPoP
 	nonceNotExposed   bool // ExposedHeaders omits DPoP-Nonce
 	badHeaderName     bool // AllowedHeaders names a list, not a header
+	boundStaffStrict  bool // a person's bound token holds nothing at root
+	appsHoldRoot      bool // an application's bound token holds at root too
 	rootFails         bool // RootScope cannot be resolved
 	rootHalf          bool // RootScope names no authority
 	rootUnstable      bool // RootScope names another scope each time
@@ -90,13 +92,18 @@ func newHost() *host {
 	now := time.Now()
 	staff := user("u-staff", now, perms...)
 	staff.proof = true
+	// Staff's sign-in exchanged for a token bound to other.
+	exchanged := user("u-staff", now, perms...)
+	exchanged.id.Credential = auth.Credential{Kind: auth.CredentialAccessToken, ID: "x-u-staff"}
+	exchanged.bound = other
 	return &host{creds: map[string]*cred{
-		"staff":    staff,
-		"customer": user("u-customer", now),
-		"reader":   user("u-reader", now, "root:billing:read"),
-		"stale":    user("u-stale", now.Add(-time.Hour), perms...),
-		"key":      app("app-1", "key-1", scope),
-		"other":    app("app-2", "key-2", other),
+		"staff":     staff,
+		"exchanged": exchanged,
+		"customer":  user("u-customer", now),
+		"reader":    user("u-reader", now, "root:billing:read"),
+		"stale":     user("u-stale", now.Add(-time.Hour), perms...),
+		"key":       app("app-1", "key-1", scope),
+		"other":     app("app-2", "key-2", other),
 		// a trusted issuer's customer token, bound to its group
 		"member": {id: auth.Identity{
 			Issuer: "https://issuer.example", Subject: "c-1", SubjectKind: auth.SubjectUser,
@@ -215,6 +222,12 @@ func (v verified) Can(_ context.Context, s auth.Scope, p string) (bool, error) {
 	if in == (auth.Scope{}) {
 		in = scope
 	}
+	switch b := v.c.bound; {
+	case h.appsHoldRoot && b != auth.Scope{} && v.c.id.SubjectKind == auth.SubjectApplication && s == scope:
+		return true, nil
+	case h.boundStaffStrict && b != auth.Scope{} && v.c.id.SubjectKind == auth.SubjectUser && s != b:
+		return false, nil
+	}
 	if h.scopeIgnored || h.authorityIgnored && s.ID == in.ID || s == in {
 		return slices.Contains(v.c.grants, p), nil
 	}
@@ -293,6 +306,7 @@ func (h *host) cases() authtest.Cases {
 		Application: req("key"),
 		Bound:       req("member"),
 		Foreign:     req("other"),
+		BoundStaff:  req("exchanged"),
 		Refused:     map[string]func() *http.Request{"forged": req("forged")},
 		Revoke: func() {
 			h.mu.Lock()
@@ -336,7 +350,9 @@ func (b bare) Authenticate(r *http.Request) (auth.Verified, error) { return b.h.
 func TestCheckPassesWithoutHeaders(t *testing.T) {
 	h := newHost()
 	h.nonceNotExposed, h.dpopNotAllowed = true, true
-	authtest.Check(t, bare{h}, h.cases())
+	c := h.cases()
+	c.BoundStaff = nil // checked in RootScope only
+	authtest.Check(t, bare{h}, c)
 }
 
 func TestCheckCatchesABrokenAuthenticator(t *testing.T) {
@@ -373,16 +389,33 @@ func TestCheckCatchesABrokenAuthenticator(t *testing.T) {
 		"half a root scope":         {func(h *host) { h.rootHalf = true }, "a scope is whole"},
 		"an unstable root scope":    {func(h *host) { h.rootUnstable = true }, "it names one scope"},
 		"root: held outside root":   {func(h *host) { h.rootElsewhere = true }, "is not RootScope"},
+		"a bound person loses root": {func(h *host) { h.boundStaffStrict = true }, "refused %s"},
+		"a bound app holds root":    {func(h *host) { h.appsHoldRoot = true }, "who does not hold it"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHost()
 			c.breakIt(h)
 			r := &recorder{TB: t}
-			authtest.Check(r, h, h.cases())
+			var a auth.Authenticator = h
+			if name == "sessions bound elsewhere" { // in RootScope a person's bound sign-in may hold its root role
+				a = bare{h}
+			}
+			authtest.Check(r, a, h.cases())
 			if !slices.ContainsFunc(r.failures, func(f string) bool { return strings.Contains(f, c.want) }) {
 				t.Fatalf("Check reported %q, not %q", r.failures, c.want)
 			}
 		})
+	}
+}
+
+// TestCheckBoundStaffNeedsRootScope: BoundStaff is checked in RootScope
+// only; without auth.Root, Check says so.
+func TestCheckBoundStaffNeedsRootScope(t *testing.T) {
+	h := newHost()
+	r := &recorder{TB: t}
+	authtest.Check(r, bare{h}, h.cases())
+	if !slices.ContainsFunc(r.failures, func(f string) bool { return strings.Contains(f, "BoundStaff needs Scope") }) {
+		t.Fatalf("Check reported %q", r.failures)
 	}
 }
 

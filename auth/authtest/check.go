@@ -50,6 +50,11 @@ type Cases struct {
 	// group's API key; it holds none of Permissions in Scope. Nil skips the
 	// case.
 	Foreign func() *http.Request
+	// BoundStaff is Staff's sign-in bound to another scope, such as a token
+	// exchanged for one group. With Scope the Authenticator's RootScope, it
+	// still holds every one of Permissions there: a person keeps their root
+	// role (auth.Bound). Nil skips the case.
+	BoundStaff func() *http.Request
 	// Revoke ends the sign-in behind Staff's credential, as signing out
 	// does. Check calls it last; Authenticate must then refuse Staff. Nil
 	// skips the case.
@@ -62,9 +67,10 @@ const unknownPermission = "authtest:unknown:permission"
 // a Refused credential, a permission to someone who does not hold it, in a
 // scope it was not granted in, or for a pattern; a stale sign-in as recent;
 // an application as a person or as signed in; a credential bound to one
-// scope as bound to another, or holding a permission outside it. With
-// auth.Root, it fails when RootScope fails, is not whole or changes, and
-// when a root: permission is held in a Scope other than RootScope. With
+// scope as bound to another, or holding a permission outside it (but a
+// person's in RootScope). With auth.Root, it fails when RootScope fails, is
+// not whole or changes, when a root: permission is held in a Scope other
+// than RootScope, and when BoundStaff loses Staff's root permissions. With
 // auth.Headers, it fails when a header Staff's credential is sent in is not
 // allowed, or a header a refusal's Challenge carries is not exposed. It
 // fails when a refuses Staff, User, a Holder, Application, Bound or Foreign,
@@ -77,8 +83,9 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 		t.Fatal("authtest: Check needs an Authenticator, Permissions, Staff and User")
 		return
 	}
-	if root, ok := a.(auth.Root); ok {
-		rs, ok := rootScope(t, root)
+	var root auth.Scope
+	if r, ok := a.(auth.Root); ok {
+		rs, ok := rootScope(t, r)
 		switch {
 		case !ok:
 		case c.Scope == auth.Scope{}:
@@ -86,6 +93,7 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 		case c.Scope != rs && slices.ContainsFunc(c.Permissions, func(p string) bool { return strings.HasPrefix(p, "root:") }):
 			t.Errorf("authtest: Scope %+v is not RootScope %+v, where root: permissions are held", c.Scope, rs)
 		}
+		root = rs
 	}
 	if c.Scope.Authority == "" || c.Scope.ID == "" {
 		t.Fatal("authtest: Check needs a Scope, or an auth.Root Authenticator's RootScope")
@@ -99,7 +107,7 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 		}
 		held[p] = true
 	}
-	ch := checker{t: t, a: a, scope: c.Scope, permission: c.Permissions[0], challenged: map[string]bool{}}
+	ch := checker{t: t, a: a, scope: c.Scope, atRoot: root != auth.Scope{} && c.Scope == root, permission: c.Permissions[0], challenged: map[string]bool{}}
 
 	ch.refused("an anonymous request", func() *http.Request {
 		r := c.Staff()
@@ -171,7 +179,25 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 			if got, ok := ch.bound("Foreign", v); ok && (got == auth.Scope{} || got == c.Scope) {
 				t.Errorf("authtest: Foreign's BoundScope is %+v; it is bound to a scope other than Scope %+v", got, c.Scope)
 			}
-			ch.lacks("Foreign", v, c.Permissions)
+			if !ch.rootPerson(v) {
+				ch.lacks("Foreign", v, c.Permissions)
+			}
+		}
+	}
+	if c.BoundStaff != nil {
+		switch v, ok := ch.person("BoundStaff", c.BoundStaff); {
+		case !ok:
+		case !ch.atRoot:
+			t.Errorf("authtest: BoundStaff needs Scope to be the Authenticator's RootScope (auth.Root)")
+		default:
+			if got, ok := ch.bound("BoundStaff", v); ok && (got == auth.Scope{} || got == c.Scope) {
+				t.Errorf("authtest: BoundStaff's BoundScope is %+v; it is bound to a scope other than RootScope %+v", got, c.Scope)
+			}
+			if staff != nil && v.Identity().Subject != staff.Identity().Subject {
+				t.Errorf("authtest: BoundStaff is subject %q, not Staff's %q", v.Identity().Subject, staff.Identity().Subject)
+			}
+			ch.holds("BoundStaff", v, c.Permissions)
+			ch.notGranted("BoundStaff", v)
 		}
 	}
 	if catalog, ok := a.(auth.PermissionCatalog); ok {
@@ -246,6 +272,8 @@ type checker struct {
 	t     testing.TB
 	a     auth.Authenticator
 	scope auth.Scope
+	// atRoot is a scope that is the Authenticator's RootScope.
+	atRoot bool
 	// permission is one every holder of all of them holds in scope.
 	permission string
 	// challenged are the headers the refusals' Challenges carried.
@@ -330,9 +358,15 @@ func (c checker) holds(name string, v auth.Verified, permissions []string) {
 			c.t.Errorf("authtest: Can(%+v, %q) refused %s: %v", c.scope, p, name, err)
 		}
 	}
-	if b := boundScope(v); b != (auth.Scope{}) && b != c.scope {
-		c.t.Errorf("authtest: %s is bound to %+v but holds permissions in %+v; a bound credential holds nothing outside its scope", name, b, c.scope)
+	if b := boundScope(v); b != (auth.Scope{}) && b != c.scope && !c.rootPerson(v) {
+		c.t.Errorf("authtest: %s is bound to %+v but holds permissions in %+v; a bound credential holds nothing outside its scope, but a person's in RootScope", name, b, c.scope)
 	}
+}
+
+// rootPerson reports a person checked in RootScope, where a person's bound
+// credential may hold their root permissions (auth.Bound).
+func (c checker) rootPerson(v auth.Verified) bool {
+	return c.atRoot && v.Identity().SubjectKind == auth.SubjectUser
 }
 
 // lacks requires v to hold none of permissions in the scope.
