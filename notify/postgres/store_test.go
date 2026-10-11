@@ -259,3 +259,33 @@ func TestErasureFencesConcurrentAndDelayedPublish(t *testing.T) {
 		t.Fatalf("user erasure crossed audience: %v", err)
 	}
 }
+
+func TestOldTransactionSnapshotCannotResurrectErasedRecipient(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "first-publication", true: "existing-recipient"}[existing], func(t *testing.T) {
+			s, pool, _ := database(t)
+			ctx := t.Context()
+			in := input("delayed")
+			if existing {
+				if _, err := s.Publish(ctx, input("before")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(ctx)
+			var count int
+			if err = tx.QueryRow(ctx, `SELECT count(*) FROM `+s.table).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if err = s.EraseRecipient(ctx, in.Recipient); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.PublishTx(ctx, tx, in); err == nil {
+				t.Fatal("old snapshot published after account erasure")
+			}
+		})
+	}
+}

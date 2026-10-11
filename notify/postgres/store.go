@@ -21,8 +21,8 @@ type Config struct{ Schema, Scope string }
 // Store retains notices and actionable items. Scope and recipients are data
 // isolation boundaries; authorization remains with the host.
 type Store struct {
-	pool                         *pgxpool.Pool
-	scope, schema, table, erased string
+	pool                     *pgxpool.Pool
+	scope, table, recipients string
 }
 
 // New binds an existing pool; it neither migrates nor opens connections.
@@ -34,7 +34,7 @@ func New(pool *pgxpool.Pool, cfg Config) (*Store, error) {
 	if pool == nil || strings.TrimSpace(cfg.Scope) == "" || len(cfg.Scope) > 512 || strings.ContainsRune(cfg.Scope, 0) {
 		return nil, fmt.Errorf("%w: pool and scope required", notify.ErrInvalid)
 	}
-	return &Store{pool: pool, scope: cfg.Scope, schema: cfg.Schema, table: name + `.notify_items`, erased: name + `.notify_erased_recipients`}, nil
+	return &Store{pool: pool, scope: cfg.Scope, table: name + `.notify_items`, recipients: name + `.notify_recipients`}, nil
 }
 
 const columns = `id,audience,recipient,source,source_scope,source_id,kind,data,created_at,read_at,status,severity,resolved_at,updated_at,revision`
@@ -48,13 +48,19 @@ func scan(row pgx.Row) (notify.Item, error) {
 	return n, err
 }
 
-func (s *Store) lock(ctx context.Context, tx pgx.Tx, r notify.Recipient) error {
+// lock takes a real row lock, so an older repeatable-read snapshot fails with
+// a serialization error when erasure changed the guard after its snapshot.
+// An advisory lock alone cannot make that snapshot see an erasure tombstone.
+func (s *Store) lock(ctx context.Context, tx pgx.Tx, r notify.Recipient) (bool, error) {
 	if err := notify.ValidateRecipient(r); err != nil {
-		return err
+		return false, err
 	}
-	key, _ := json.Marshal([]string{s.schema, s.scope, string(r.Audience), r.ID})
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, string(key))
-	return err
+	if _, err := tx.Exec(ctx, `INSERT INTO `+s.recipients+`(scope,audience,recipient) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, s.scope, r.Audience, r.ID); err != nil {
+		return false, err
+	}
+	var erased bool
+	err := tx.QueryRow(ctx, `SELECT erased_at IS NOT NULL FROM `+s.recipients+` WHERE scope=$1 AND audience=$2 AND recipient=$3 FOR UPDATE`, s.scope, r.Audience, r.ID).Scan(&erased)
+	return erased, err
 }
 
 // Publish inserts once per origin and recipient. Retries preserve content and
@@ -82,11 +88,8 @@ func (s *Store) PublishTx(ctx context.Context, tx pgx.Tx, in notify.Input) (noti
 	if tx == nil {
 		return notify.Item{}, fmt.Errorf("%w: transaction required", notify.ErrInvalid)
 	}
-	if err = s.lock(ctx, tx, in.Recipient); err != nil {
-		return notify.Item{}, err
-	}
-	var erased bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+s.erased+` WHERE scope=$1 AND audience=$2 AND recipient=$3)`, s.scope, in.Recipient.Audience, in.Recipient.ID).Scan(&erased); err != nil {
+	erased, err := s.lock(ctx, tx, in.Recipient)
+	if err != nil {
 		return notify.Item{}, err
 	}
 	if erased {
@@ -208,6 +211,13 @@ func (s *Store) TransitionTx(ctx context.Context, tx pgx.Tx, r notify.Recipient,
 	if tx == nil || revision < 1 || status == notify.StatusNotice || !validStatus(status) {
 		return notify.Item{}, fmt.Errorf("%w: workflow transition", notify.ErrInvalid)
 	}
+	erased, err := s.lock(ctx, tx, r)
+	if err != nil {
+		return notify.Item{}, err
+	}
+	if erased {
+		return notify.Item{}, notify.ErrRecipientErased
+	}
 	current, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND audience=$2 AND recipient=$3 AND id=$4 FOR UPDATE`, s.scope, r.Audience, r.ID, id))
 	if err != nil {
 		return current, err
@@ -243,10 +253,10 @@ func (s *Store) EraseRecipientTx(ctx context.Context, tx pgx.Tx, r notify.Recipi
 	if tx == nil {
 		return fmt.Errorf("%w: transaction required", notify.ErrInvalid)
 	}
-	if err := s.lock(ctx, tx, r); err != nil {
+	if _, err := s.lock(ctx, tx, r); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO `+s.erased+`(scope,audience,recipient) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, s.scope, r.Audience, r.ID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE `+s.recipients+` SET erased_at=coalesce(erased_at,clock_timestamp()) WHERE scope=$1 AND audience=$2 AND recipient=$3`, s.scope, r.Audience, r.ID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `DELETE FROM `+s.table+` WHERE scope=$1 AND audience=$2 AND recipient=$3`, s.scope, r.Audience, r.ID)

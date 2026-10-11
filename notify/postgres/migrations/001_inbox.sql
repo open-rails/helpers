@@ -24,10 +24,10 @@ CREATE INDEX IF NOT EXISTS notify_items_inbox_idx
 CREATE INDEX IF NOT EXISTS notify_items_unread_idx
     ON {{schema}}.notify_items(scope, audience, recipient, created_at DESC, id DESC)
     WHERE read_at IS NULL;
-CREATE TABLE IF NOT EXISTS {{schema}}.notify_erased_recipients (
+CREATE TABLE IF NOT EXISTS {{schema}}.notify_recipients (
     scope text NOT NULL,
     audience text NOT NULL CHECK (audience IN ('user', 'operator')),
     recipient text NOT NULL,
-    erased_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    erased_at timestamptz,
     PRIMARY KEY (scope, audience, recipient)
 );
