@@ -2,7 +2,9 @@
 
 `helpers/notify` describes general notices and actionable items without importing an application, router, identity provider or database. `helpers/notify/postgres` stores them on the host's PostgreSQL pool. AuthKit, OpenRails, ContentKit and their hosts can use the same types; adopting this package does not require any of them to invent notifications.
 
-General notices, such as a comment reply or a receipt, have an empty `Status`. Actionable items, such as a failed payment or an operator finding, have `open`, `resolved` or `dismissed` status. **Read state is independent:** reading a failed-payment notice does not fix the payment. `Transition` only records workflow state; the application authorizes and executes the real action. `TransitionTx` can commit that action and its resolution atomically. Revision checks reject stale actions.
+General notices, such as a comment reply or a receipt, have an empty `Status`. Tracked actionable items, such as an operator finding, have `open`, `resolved` or `dismissed` status. **Read state is independent:** reading a failed-payment notice does not fix the payment. `Transition` only records workflow state; the application authorizes and executes the real action. `TransitionTx` can commit that action and its resolution atomically. Revision checks reject stale actions.
+
+`ActionRequested` preserves classification separately from workflow. A historical "payment failed" notice can record that action was requested, with an empty `Status`, without falsely claiming that the payment still fails today. Imports of such history retain the flag and can display "Action requested"; only an authoritative workflow should display "Open" or "Needs attention". Publishing a tracked `StatusOpen` item sets the flag automatically. Reading never changes either value.
 
 The host controls which categories produce notices. Routine charge reminders/receipts can be off by default without suppressing failed-payment notices. Preferences and rendering are domain policy, so there is no hard-coded event taxonomy, email template or automatic sender in this package.
 

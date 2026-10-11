@@ -113,9 +113,13 @@ func TestPublishRetryReadAndResolutionAreIndependent(t *testing.T) {
 	}
 	in = input("notice")
 	in.Status = notify.StatusNotice
+	in.ActionRequested = true // Historical request, without a tracked workflow.
 	n, err = s.Publish(ctx, in)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !n.ActionRequested || n.Status != notify.StatusNotice {
+		t.Fatalf("history became open work: %+v", n)
 	}
 	if _, err = s.Transition(ctx, in.Recipient, n.ID, n.Revision, notify.StatusResolved); !errors.Is(err, notify.ErrInvalid) {
 		t.Fatalf("general notice gained workflow: %v", err)

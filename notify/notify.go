@@ -59,7 +59,10 @@ type Input struct {
 	Data      json.RawMessage `json:"data"`
 	CreatedAt time.Time       `json:"created_at"`
 	Status    Status          `json:"status,omitempty"`
-	Severity  string          `json:"severity,omitempty"`
+	// ActionRequested records the item's category at creation. With empty Status
+	// it is historical information, not a claim that the issue is still open.
+	ActionRequested bool   `json:"action_requested,omitempty"`
+	Severity        string `json:"severity,omitempty"`
 }
 
 // Item is an inbox record or a projection of an existing domain record.
@@ -100,6 +103,9 @@ func Validate(in Input) (Input, error) {
 	}
 	if in.Status != StatusNotice && in.Status != StatusOpen {
 		return in, fmt.Errorf("%w: publish status must be notice or open", ErrInvalid)
+	}
+	if in.Status == StatusOpen {
+		in.ActionRequested = true
 	}
 	if len(in.Data) == 0 {
 		in.Data = json.RawMessage(`{}`)

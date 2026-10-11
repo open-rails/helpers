@@ -82,15 +82,23 @@ func migrate(ctx context.Context, schema string, exec func(string, ...any) error
 	if err != nil {
 		return err
 	}
-	if v >= 1 {
-		return nil
-	} // Older readers coexist with additive future migrations.
-	b, err := migrations.ReadFile("migrations/001_inbox.sql")
-	if err != nil {
-		return err
+	// Older readers coexist with additive future migrations. Each version and
+	// its ledger entry commit atomically under the migration lock.
+	for i, path := range []string{"migrations/001_inbox.sql", "migrations/002_action_requested.sql"} {
+		version := i + 1
+		if version <= v {
+			continue
+		}
+		b, err := migrations.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err = exec(strings.ReplaceAll(string(b), "{{schema}}", name)); err != nil {
+			return fmt.Errorf("notify: migration %d: %w", version, err)
+		}
+		if err = exec(`INSERT INTO `+ledger+`(version) VALUES ($1)`, version); err != nil {
+			return err
+		}
 	}
-	if err = exec(strings.ReplaceAll(string(b), "{{schema}}", name)); err != nil {
-		return fmt.Errorf("notify: migration 1: %w", err)
-	}
-	return exec(`INSERT INTO ` + ledger + `(version) VALUES (1)`)
+	return nil
 }

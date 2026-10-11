@@ -37,13 +37,18 @@ func New(pool *pgxpool.Pool, cfg Config) (*Store, error) {
 	return &Store{pool: pool, scope: cfg.Scope, table: name + `.notify_items`, recipients: name + `.notify_recipients`}, nil
 }
 
-const columns = `id,audience,recipient,source,source_scope,source_id,kind,data,created_at,read_at,status,severity,resolved_at,updated_at,revision`
+const columns = `id,audience,recipient,source,source_scope,source_id,kind,data,created_at,read_at,status,severity,resolved_at,updated_at,revision,action_requested`
 
 func scan(row pgx.Row) (notify.Item, error) {
 	var n notify.Item
-	err := row.Scan(&n.ID, &n.Recipient.Audience, &n.Recipient.ID, &n.Origin.System, &n.Origin.Scope, &n.Origin.ID, &n.Kind, &n.Data, &n.CreatedAt, &n.ReadAt, &n.Status, &n.Severity, &n.ResolvedAt, &n.UpdatedAt, &n.Revision)
+	err := row.Scan(&n.ID, &n.Recipient.Audience, &n.Recipient.ID, &n.Origin.System, &n.Origin.Scope, &n.Origin.ID, &n.Kind, &n.Data, &n.CreatedAt, &n.ReadAt, &n.Status, &n.Severity, &n.ResolvedAt, &n.UpdatedAt, &n.Revision, &n.ActionRequested)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return n, notify.ErrNotFound
+	}
+	// An older producer can still insert workflow items after migration 2.
+	// Their nonempty status already establishes the action-request category.
+	if n.Status != notify.StatusNotice {
+		n.ActionRequested = true
 	}
 	return n, err
 }
@@ -95,7 +100,7 @@ func (s *Store) PublishTx(ctx context.Context, tx pgx.Tx, in notify.Input) (noti
 	if erased {
 		return notify.Item{}, notify.ErrRecipientErased
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO `+s.table+`(scope,id,audience,recipient,source,source_scope,source_id,kind,data,created_at,status,severity) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(scope,audience,recipient,source,source_scope,source_id) DO NOTHING`, s.scope, rand.Text(), in.Recipient.Audience, in.Recipient.ID, in.Origin.System, in.Origin.Scope, in.Origin.ID, in.Kind, in.Data, in.CreatedAt, in.Status, in.Severity)
+	_, err = tx.Exec(ctx, `INSERT INTO `+s.table+`(scope,id,audience,recipient,source,source_scope,source_id,kind,data,created_at,status,severity,action_requested) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(scope,audience,recipient,source,source_scope,source_id) DO NOTHING`, s.scope, rand.Text(), in.Recipient.Audience, in.Recipient.ID, in.Origin.System, in.Origin.Scope, in.Origin.ID, in.Kind, in.Data, in.CreatedAt, in.Status, in.Severity, in.ActionRequested)
 	if err != nil {
 		return notify.Item{}, fmt.Errorf("notify: publish: %w", err)
 	}
