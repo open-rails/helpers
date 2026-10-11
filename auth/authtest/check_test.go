@@ -18,11 +18,11 @@ import (
 const issuer = "https://host.example"
 
 var (
-	scope = auth.Scope{Authority: issuer, ID: "merchant-1"}
+	scope = auth.Scope{Authority: issuer, ID: "root"}
 	other = auth.Scope{Authority: issuer, ID: "merchant-2"}
 )
 
-var perms = []string{"billing:read", "billing:refund"}
+var perms = []string{"root:billing:read", "root:billing:refund"}
 
 // host is an in-memory Authenticator; its flags break it the ways Check
 // must catch.
@@ -55,6 +55,11 @@ type host struct {
 	dpopNotAllowed    bool // AllowedHeaders omits DPoP
 	nonceNotExposed   bool // ExposedHeaders omits DPoP-Nonce
 	badHeaderName     bool // AllowedHeaders names a list, not a header
+	rootFails         bool // RootScope cannot be resolved
+	rootHalf          bool // RootScope names no authority
+	rootUnstable      bool // RootScope names another scope each time
+	rootElsewhere     bool // RootScope is not where root: permissions are held
+	rootCalls         int
 }
 
 type cred struct {
@@ -88,7 +93,7 @@ func newHost() *host {
 	return &host{creds: map[string]*cred{
 		"staff":    staff,
 		"customer": user("u-customer", now),
-		"reader":   user("u-reader", now, "billing:read"),
+		"reader":   user("u-reader", now, "root:billing:read"),
 		"stale":    user("u-stale", now.Add(-time.Hour), perms...),
 		"key":      app("app-1", "key-1", scope),
 		"other":    app("app-2", "key-2", other),
@@ -154,6 +159,21 @@ func (h *host) verified(c *cred) auth.Verified {
 		return canOnly{base}
 	}
 	return base
+}
+
+func (h *host) RootScope(context.Context) (auth.Scope, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.rootCalls++
+	switch {
+	case h.rootFails:
+		return auth.Scope{}, auth.ErrUnavailable
+	case h.rootHalf:
+		return auth.Scope{ID: scope.ID}, nil
+	case h.rootUnstable && h.rootCalls > 1, h.rootElsewhere:
+		return other, nil
+	}
+	return scope, nil
 }
 
 func (h *host) KnownPermission(p string) bool { return h.knowsEverything || slices.Contains(perms, p) }
@@ -268,7 +288,7 @@ func (h *host) cases() authtest.Cases {
 			return r
 		},
 		User:        req("customer"),
-		Holders:     map[string]func() *http.Request{"billing:read": req("reader")},
+		Holders:     map[string]func() *http.Request{"root:billing:read": req("reader")},
 		Stale:       req("stale"),
 		Application: req("key"),
 		Bound:       req("member"),
@@ -298,15 +318,25 @@ func TestCheckPassesAConformingAuthenticator(t *testing.T) {
 	authtest.Check(t, h, h.cases())
 }
 
-// noHeaders hides the host's Headers: the capability is optional.
-type noHeaders struct{ h *host }
+// TestCheckTakesRootScope: without a Scope, Permissions are held in the
+// Authenticator's RootScope.
+func TestCheckTakesRootScope(t *testing.T) {
+	h := newHost()
+	c := h.cases()
+	c.Scope = auth.Scope{}
+	authtest.Check(t, h, c)
+}
 
-func (n noHeaders) Authenticate(r *http.Request) (auth.Verified, error) { return n.h.Authenticate(r) }
+// bare hides the host's optional capabilities (Root, Headers,
+// PermissionCatalog).
+type bare struct{ h *host }
+
+func (b bare) Authenticate(r *http.Request) (auth.Verified, error) { return b.h.Authenticate(r) }
 
 func TestCheckPassesWithoutHeaders(t *testing.T) {
 	h := newHost()
 	h.nonceNotExposed, h.dpopNotAllowed = true, true
-	authtest.Check(t, noHeaders{h}, h.cases())
+	authtest.Check(t, bare{h}, h.cases())
 }
 
 func TestCheckCatchesABrokenAuthenticator(t *testing.T) {
@@ -339,6 +369,10 @@ func TestCheckCatchesABrokenAuthenticator(t *testing.T) {
 		"DPoP not allowed":          {func(h *host) { h.dpopNotAllowed = true }, "AllowedHeaders does not name"},
 		"nonce not exposed":         {func(h *host) { h.nonceNotExposed = true }, "ExposedHeaders does not name"},
 		"a list as a header name":   {func(h *host) { h.badHeaderName = true }, "not a header name"},
+		"RootScope fails":           {func(h *host) { h.rootFails = true }, "RootScope failed"},
+		"half a root scope":         {func(h *host) { h.rootHalf = true }, "a scope is whole"},
+		"an unstable root scope":    {func(h *host) { h.rootUnstable = true }, "it names one scope"},
+		"root: held outside root":   {func(h *host) { h.rootElsewhere = true }, "is not RootScope"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHost()
@@ -358,7 +392,7 @@ func TestCheckRefusesIncompleteCases(t *testing.T) {
 		"no scope":              func(c *authtest.Cases) { c.Scope = auth.Scope{} },
 		"half a scope":          func(c *authtest.Cases) { c.Scope.Authority = "" },
 		"no permissions":        func(c *authtest.Cases) { c.Permissions = nil },
-		"a repeated permission": func(c *authtest.Cases) { c.Permissions = []string{"billing:read", "billing:read"} },
+		"a repeated permission": func(c *authtest.Cases) { c.Permissions = []string{"root:billing:read", "root:billing:read"} },
 		"no staff":              func(c *authtest.Cases) { c.Staff = nil },
 		"no user":               func(c *authtest.Cases) { c.User = nil },
 	} {
@@ -366,7 +400,7 @@ func TestCheckRefusesIncompleteCases(t *testing.T) {
 			c := h.cases()
 			edit(&c)
 			r := &recorder{TB: t}
-			authtest.Check(r, h, c)
+			authtest.Check(r, bare{h}, c)
 			if len(r.failures) != 1 {
 				t.Fatalf("drew %v", r.failures)
 			}

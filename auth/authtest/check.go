@@ -17,8 +17,8 @@ import (
 // Cases are credentials the host's auth holds when Check runs. Each is a
 // function returning a fresh request, since a sender proof is spent once.
 type Cases struct {
-	// Scope is where Permissions are held: the scope the host gives the
-	// library (OpenRails' Routes.Scope).
+	// Scope is where Permissions are held. Zero is the Authenticator's
+	// RootScope (auth.Root), where root: permissions are held.
 	Scope auth.Scope
 	// Permissions are the permissions the host gives the library, at least
 	// one.
@@ -63,6 +63,8 @@ const unknownPermission = "authtest:unknown:permission"
 // scope it was not granted in, or for a pattern; a stale sign-in as recent;
 // an application as a person or as signed in; a credential bound to one
 // scope as bound to another, or holding a permission outside it. With
+// auth.Root, it fails when RootScope fails, is not whole or changes, and
+// when a root: permission is held in a Scope other than RootScope. With
 // auth.Headers, it fails when a header Staff's credential is sent in is not
 // allowed, or a header a refusal's Challenge carries is not exposed. It
 // fails when a refuses Staff, User, a Holder, Application, Bound or Foreign,
@@ -71,8 +73,22 @@ const unknownPermission = "authtest:unknown:permission"
 // same.
 func Check(t testing.TB, a auth.Authenticator, c Cases) {
 	t.Helper()
-	if a == nil || c.Scope.Authority == "" || c.Scope.ID == "" || len(c.Permissions) == 0 || c.Staff == nil || c.User == nil {
-		t.Fatal("authtest: Check needs an Authenticator, a Scope, Permissions, Staff and User")
+	if a == nil || len(c.Permissions) == 0 || c.Staff == nil || c.User == nil {
+		t.Fatal("authtest: Check needs an Authenticator, Permissions, Staff and User")
+		return
+	}
+	if root, ok := a.(auth.Root); ok {
+		rs, ok := rootScope(t, root)
+		switch {
+		case !ok:
+		case c.Scope == auth.Scope{}:
+			c.Scope = rs
+		case c.Scope != rs && slices.ContainsFunc(c.Permissions, func(p string) bool { return strings.HasPrefix(p, "root:") }):
+			t.Errorf("authtest: Scope %+v is not RootScope %+v, where root: permissions are held", c.Scope, rs)
+		}
+	}
+	if c.Scope.Authority == "" || c.Scope.ID == "" {
+		t.Fatal("authtest: Check needs a Scope, or an auth.Root Authenticator's RootScope")
 		return
 	}
 	held := map[string]bool{}
@@ -205,6 +221,25 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 			}
 		}
 	}
+}
+
+// rootScope requires RootScope to name one whole scope, the same each time.
+func rootScope(t testing.TB, root auth.Root) (auth.Scope, bool) {
+	t.Helper()
+	first, err := root.RootScope(t.Context())
+	if err != nil {
+		t.Errorf("authtest: RootScope failed: %v", err)
+		return auth.Scope{}, false
+	}
+	if first.Authority == "" || first.ID == "" {
+		t.Errorf("authtest: RootScope is %+v; a scope is whole", first)
+		return auth.Scope{}, false
+	}
+	if again, err := root.RootScope(t.Context()); err != nil || again != first {
+		t.Errorf("authtest: RootScope changed from %+v to %+v (%v); it names one scope", first, again, err)
+		return auth.Scope{}, false
+	}
+	return first, true
 }
 
 type checker struct {

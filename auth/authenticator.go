@@ -40,8 +40,9 @@ type Verified interface {
 
 // Scope names an authority-owned immutable resource, such as the group
 // whose members administer a merchant: Authority is the issuer whose groups
-// it is in, ID its id there. The consumer is configured with it or keeps it
-// beside the resource; names and request selectors grant nothing.
+// it is in, ID its id there. The consumer keeps it beside the resource, or
+// asks the Authenticator's RootScope (Root); names and request selectors
+// grant nothing.
 type Scope struct {
 	Authority string
 	ID        string
@@ -91,6 +92,16 @@ type PermissionCatalog interface {
 // credential is bound to none.
 type Bound interface {
 	BoundScope() Scope
+}
+
+// Root is an optional capability of an Authenticator. RootScope is the scope
+// its root permissions (root:<resource>:<action>) are held in, which spans
+// everything the deployment serves, such as AuthKit's root group. A consumer
+// checks a root: permission there (PermissionChecker.Can), so its host
+// configures no scope; without Root a consumer grants no root: permission.
+// Its error matches ErrUnavailable when the scope could not be resolved.
+type Root interface {
+	RootScope(ctx context.Context) (Scope, error)
 }
 
 // Headers is an optional capability of an Authenticator: the header names
