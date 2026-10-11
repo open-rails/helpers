@@ -25,8 +25,8 @@ var (
 )
 
 // shop is a host's own auth with no AuthKit: bearer sessions, API keys bound
-// to a scope and a trusted issuer's tokens in a table, grants per scope, all
-// read live. It imports this package alone.
+// to a scope, a trusted issuer's tokens and its backend's customer tokens in a
+// table, grants per scope, all read live. It imports this package alone.
 type shop struct {
 	mu       sync.Mutex
 	creds    map[string]*cred
@@ -41,6 +41,7 @@ type cred struct {
 	signedIn time.Time // zero: no sign-in of its own
 	revoked  bool
 	nonce    bool // DPoP-bound: refused until it presents a nonce
+	asserted bool // minted from an application's assertion
 }
 
 func person(id, credential string, signedIn time.Time, grants map[auth.Scope][]string) *cred {
@@ -80,6 +81,12 @@ func newShop() *shop {
 			Invoker:    auth.Invoker{Issuer: "https://idp.example", ID: "c-1"},
 			Credential: auth.Credential{Kind: auth.CredentialAccessToken, ID: "jti-1"},
 		}, bound: billing, signedIn: now},
+		// a customer token minted from billing's backend's assertion
+		"asserted": {identity: auth.Identity{
+			Issuer: "https://backend.example", Subject: "c-2", SubjectKind: auth.SubjectUser,
+			Invoker:    auth.Invoker{Issuer: "https://backend.example", ID: "c-2"},
+			Credential: auth.Credential{Kind: auth.CredentialAccessToken, ID: "jti-2"},
+		}, bound: billing, asserted: true},
 	}}
 }
 
@@ -135,6 +142,8 @@ func (v verified) Can(_ context.Context, scope auth.Scope, permission string) (b
 }
 
 func (v verified) BoundScope() auth.Scope { return v.c.bound }
+
+func (v verified) Asserted() bool { return v.c.asserted }
 
 func (v verified) CheckRecentSignIn(context.Context) error {
 	switch {
@@ -426,6 +435,7 @@ func TestHostsOwnAuthConforms(t *testing.T) {
 		Application: req("key-1"),
 		Bound:       req("member"),
 		Foreign:     req("key-2"),
+		Asserted:    req("asserted"),
 		Refused: map[string]func() *http.Request{"forged": req("forged"), "revoked": req("revoked"), "DPoP-bound without a proof": func() *http.Request {
 			r := req("dpop")()
 			r.Header.Set("Authorization", "DPoP dpop")

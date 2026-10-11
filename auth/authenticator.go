@@ -33,7 +33,8 @@ type Authenticator interface {
 // Verified is one request's verified credential. A consumer keeps it only
 // for that request: never for another request, nor after the credential,
 // method or signed URL changes. It may implement PermissionChecker,
-// RecentSignInChecker and Bound; an identity-only provider implements none.
+// RecentSignInChecker, Bound and Asserted; an identity-only provider
+// implements none.
 type Verified interface {
 	Identity() Identity
 }
@@ -97,6 +98,16 @@ type PermissionCatalog interface {
 // this capability a credential is bound to none.
 type Bound interface {
 	BoundScope() Scope
+}
+
+// Asserted is an optional capability of a Verified request. Asserted is
+// true for a credential minted from an application's assertion naming one of
+// the application's own users (the RFC 7523 JWT bearer grant), such as a
+// merchant backend's token for its customer, and false for any other: a
+// session, an API key, a token exchanged for a resource, a trusted issuer's
+// own token. Without this capability a credential is not asserted.
+type Asserted interface {
+	Asserted() bool
 }
 
 // Root is an optional capability of an Authenticator. RootScope is the scope

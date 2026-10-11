@@ -55,6 +55,10 @@ type Cases struct {
 	// still holds every one of Permissions there: a person keeps their root
 	// role (auth.Bound). Nil skips the case.
 	BoundStaff func() *http.Request
+	// Asserted is a credential minted from an application's assertion
+	// (auth.Asserted), such as a backend's token for its customer. Nil skips
+	// the case.
+	Asserted func() *http.Request
 	// Revoke ends the sign-in behind Staff's credential, as signing out
 	// does. Check calls it last; Authenticate must then refuse Staff. Nil
 	// skips the case.
@@ -68,15 +72,16 @@ const unknownPermission = "authtest:unknown:permission"
 // scope it was not granted in, or for a pattern; a stale sign-in as recent;
 // an application as a person or as signed in; a credential bound to one
 // scope as bound to another, or holding a permission outside it (but a
-// person's in RootScope). With auth.Root, it fails when RootScope fails, is
-// not whole or changes, when a root: permission is held in a Scope other
-// than RootScope, and when BoundStaff loses Staff's root permissions. With
+// person's in RootScope); any credential but Asserted as asserted, or
+// Asserted as not. With auth.Root, it fails when RootScope fails, is not
+// whole or changes, when a root: permission is held in a Scope other than
+// RootScope, and when BoundStaff loses Staff's root permissions. With
 // auth.Headers, it fails when a header Staff's credential is sent in is not
 // allowed, or a header a refusal's Challenge carries is not exposed. It
-// fails when a refuses Staff, User, a Holder, Application, Bound or Foreign,
-// so a check cannot pass vacuously, and when an error classifies as anything
-// but the contract says (auth.Refuse), so every consumer answers it the
-// same.
+// fails when a refuses Staff, User, a Holder, Application, Bound, Foreign or
+// Asserted, so a check cannot pass vacuously, and when an error classifies
+// as anything but the contract says (auth.Refuse), so every consumer answers
+// it the same.
 func Check(t testing.TB, a auth.Authenticator, c Cases) {
 	t.Helper()
 	if a == nil || len(c.Permissions) == 0 || c.Staff == nil || c.User == nil {
@@ -200,6 +205,15 @@ func Check(t testing.TB, a auth.Authenticator, c Cases) {
 			ch.notGranted("BoundStaff", v)
 		}
 	}
+	if c.Asserted != nil {
+		if v, ok := ch.verified("Asserted", c.Asserted); ok {
+			if a, ok := v.(auth.Asserted); !ok {
+				t.Errorf("authtest: Asserted's Verified has no Asserted")
+			} else if !a.Asserted() {
+				t.Errorf("authtest: Asserted's Verified answers Asserted() false; it was minted from an application's assertion")
+			}
+		}
+	}
 	if catalog, ok := a.(auth.PermissionCatalog); ok {
 		for _, p := range c.Permissions {
 			if !catalog.KnownPermission(p) {
@@ -280,8 +294,19 @@ type checker struct {
 	challenged map[string]bool
 }
 
-// admitted requires Authenticate to admit req, with a whole identity.
+// admitted requires Authenticate to admit req, with a whole identity, as a
+// credential not minted from an assertion.
 func (c checker) admitted(name string, req func() *http.Request) (auth.Verified, bool) {
+	c.t.Helper()
+	v, ok := c.verified(name, req)
+	if ok && asserted(v) {
+		c.t.Errorf("authtest: %s's Verified is Asserted; only a credential minted from an application's assertion is", name)
+	}
+	return v, ok
+}
+
+// verified requires Authenticate to admit req, with a whole identity.
+func (c checker) verified(name string, req func() *http.Request) (auth.Verified, bool) {
 	c.t.Helper()
 	v, err := c.a.Authenticate(req())
 	switch {
@@ -428,6 +453,11 @@ func boundScope(v auth.Verified) auth.Scope {
 		return b.BoundScope()
 	}
 	return auth.Scope{}
+}
+
+func asserted(v auth.Verified) bool {
+	a, ok := v.(auth.Asserted)
+	return ok && a.Asserted()
 }
 
 // bound requires v to report its bound scope.

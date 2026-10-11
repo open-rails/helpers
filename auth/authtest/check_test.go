@@ -61,6 +61,9 @@ type host struct {
 	rootHalf          bool // RootScope names no authority
 	rootUnstable      bool // RootScope names another scope each time
 	rootElsewhere     bool // RootScope is not where root: permissions are held
+	noAsserted        bool // Verified has no Asserted
+	assertionIgnored  bool // the assertion's credential is not asserted
+	everyoneAsserted  bool // every credential is asserted
 	rootCalls         int
 }
 
@@ -72,6 +75,7 @@ type cred struct {
 	signedIn time.Time
 	revoked  bool
 	proof    bool // DPoP-bound: refused without a proof
+	asserted bool
 }
 
 func newHost() *host {
@@ -110,6 +114,12 @@ func newHost() *host {
 			Invoker:    auth.Invoker{Issuer: "https://issuer.example", ID: "c-1"},
 			Credential: auth.Credential{Kind: auth.CredentialAccessToken, ID: "jti-1"},
 		}, bound: scope, signedIn: now},
+		// a customer token minted from its backend's assertion
+		"asserted": {id: auth.Identity{
+			Issuer: "https://backend.example", Subject: "c-2", SubjectKind: auth.SubjectUser,
+			Invoker:    auth.Invoker{Issuer: "https://backend.example", ID: "c-2"},
+			Credential: auth.Credential{Kind: auth.CredentialAccessToken, ID: "jti-2"},
+		}, bound: scope, asserted: true},
 	}}
 }
 
@@ -164,6 +174,8 @@ func (h *host) verified(c *cred) auth.Verified {
 		return identityOnly{base}
 	case h.noRecentSignIn:
 		return canOnly{base}
+	case h.noAsserted:
+		return unasserted{base}
 	}
 	return base
 }
@@ -262,6 +274,10 @@ func (v verified) CheckRecentSignIn(context.Context) error {
 	return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute}
 }
 
+func (v verified) Asserted() bool {
+	return v.h.everyoneAsserted || v.c.asserted && !v.h.assertionIgnored
+}
+
 // unbound is a Verified without BoundScope.
 type unbound struct{ v verified }
 
@@ -270,6 +286,16 @@ func (u unbound) Can(ctx context.Context, s auth.Scope, p string) (bool, error) 
 	return u.v.Can(ctx, s, p)
 }
 func (u unbound) CheckRecentSignIn(ctx context.Context) error { return u.v.CheckRecentSignIn(ctx) }
+
+// unasserted is a Verified without Asserted.
+type unasserted struct{ v verified }
+
+func (u unasserted) Identity() auth.Identity { return u.v.Identity() }
+func (u unasserted) Can(ctx context.Context, s auth.Scope, p string) (bool, error) {
+	return u.v.Can(ctx, s, p)
+}
+func (u unasserted) CheckRecentSignIn(ctx context.Context) error { return u.v.CheckRecentSignIn(ctx) }
+func (u unasserted) BoundScope() auth.Scope                      { return u.v.BoundScope() }
 
 type canOnly struct{ v verified }
 
@@ -307,6 +333,7 @@ func (h *host) cases() authtest.Cases {
 		Bound:       req("member"),
 		Foreign:     req("other"),
 		BoundStaff:  req("exchanged"),
+		Asserted:    req("asserted"),
 		Refused:     map[string]func() *http.Request{"forged": req("forged")},
 		Revoke: func() {
 			h.mu.Lock()
@@ -391,6 +418,9 @@ func TestCheckCatchesABrokenAuthenticator(t *testing.T) {
 		"root: held outside root":   {func(h *host) { h.rootElsewhere = true }, "is not RootScope"},
 		"a bound person loses root": {func(h *host) { h.boundStaffStrict = true }, "refused %s"},
 		"a bound app holds root":    {func(h *host) { h.appsHoldRoot = true }, "who does not hold it"},
+		"no Asserted":               {func(h *host) { h.noAsserted = true }, "has no Asserted"},
+		"an assertion not asserted": {func(h *host) { h.assertionIgnored = true }, "answers Asserted() false"},
+		"everyone asserted":         {func(h *host) { h.everyoneAsserted = true }, "only a credential minted"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHost()
