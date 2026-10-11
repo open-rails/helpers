@@ -8,11 +8,15 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | `github.com/open-rails/helpers/auth` | The host's auth as a library takes it: `Authenticator`, the verified request's identity (subject, invoker, credential) and optional permission and recent sign-in checks, the standard refusal (`Refuse`), and its conformance check (`authtest`) | Standard library |
 | `github.com/open-rails/helpers/userinfo` | The host directory's user lookup (`Lookup`) and its conformance check (`userinfotest`) | Standard library |
 | `github.com/open-rails/helpers/smtp` | Send email through any SMTP server (`smtptest`: an in-process server for end-to-end tests) | Standard library |
+| `github.com/open-rails/helpers/notify` | Shared general notices and actionable inbox items; read and resolution are separate | Standard library |
+| `github.com/open-rails/helpers/notify/postgres` | Durable scoped inbox, transactional publication, replay deduplication, read/workflow state and recipient erasure | pgx |
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
 | `github.com/open-rails/helpers/river` | Initialize River tables and compose one host-owned client | River and pgx |
 | `github.com/open-rails/helpers/deps` | Dependency supervision, Redis client, fallback switch, probe/status/metrics handlers | go-redis |
 
 Import only the packages an application needs. The API core does not import Gin or River. Go builds the imported packages and their dependencies; all packages share this module's version and Go/toolchain requirements.
+
+See the [shared inbox guide](notify/README.md) for notification producers, existing-source projections and the PostgreSQL lifecycle.
 
 ## API helpers
 
