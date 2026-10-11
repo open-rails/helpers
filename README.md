@@ -5,8 +5,6 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | Import | Purpose | Runtime dependencies |
 | --- | --- | --- |
 | `github.com/open-rails/helpers/api` | HTTP errors, responses, safe metadata and pagination | Standard library |
-| `github.com/open-rails/helpers/auth` | The host's auth as a library takes it: `Authenticator`, the verified request's identity (subject, invoker, credential) and optional permission and recent sign-in checks, the standard refusal (`Refuse`), and its conformance check (`authtest`) | Standard library |
-| `github.com/open-rails/helpers/userinfo` | The host directory's user lookup (`Lookup`) and its conformance check (`userinfotest`) | Standard library |
 | `github.com/open-rails/helpers/smtp` | Send email through any SMTP server (`smtptest`: an in-process server for end-to-end tests) | Standard library |
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
 | `github.com/open-rails/helpers/river` | Initialize River tables and compose one host-owned client | River and pgx |
@@ -18,30 +16,20 @@ Import only the packages an application needs. The API core does not import Gin 
 
 The core provides typed errors, stable type/code fields, optional request IDs, bounded/sanitized metadata, JSON writers and generic list/message/deletion responses. The Gin adapter delegates to those writers and adds pagination binding and locale middleware. It does not add a router or authentication system. Existing response bytes are retained, including omitted codes/discriminators and preserved request IDs.
 
-## Authentication
+## Authentication and user-directory contracts
 
-`auth.Authenticator` is a host's auth as a library (OpenRails) takes it to guard its own routes. The host only says who a request is; the library builds its gates, so the host writes no middleware.
+The `auth` and `userinfo` packages, with their conformance test packages, now belong to AuthKit v1.24.0 in the same AuthKit Go module:
 
-`Authenticate(r)` verifies the request's credential live (a revoked sign-in, banned or deleted account is refused) and returns its `Verified`: `Identity()` is the native account whose authority it uses (`Subject` within `Issuer`, a `user` or an `application`), who actually acts (`Invoker`: the subject itself, or someone acting on its behalf) and how it was proven (`Credential`: a session, device key, API key, signed token or access token; never the subject). A credential's bounds are the provider's opaque `Credential.State`, which encoding drops, so an `Identity` built or decoded from data grants nothing. A consumer calls `Authenticate` once per request and keeps the `Verified` for that request alone.
+| Previous import | Current import |
+| --- | --- |
+| `github.com/open-rails/helpers/auth` | `github.com/open-rails/authkit/auth` |
+| `github.com/open-rails/helpers/auth/authtest` | `github.com/open-rails/authkit/auth/authtest` |
+| `github.com/open-rails/helpers/userinfo` | `github.com/open-rails/authkit/userinfo` |
+| `github.com/open-rails/helpers/userinfo/userinfotest` | `github.com/open-rails/authkit/userinfo/userinfotest` |
 
-Two optional capabilities of a `Verified` carry authority, and their absence denies:
+The contracts use only the standard library, and their conformance packages add only their corresponding contract package. Importing them does not import, build or initialize AuthKit's service implementation. Custom host implementations remain supported.
 
-- `Can(ctx, scope, permission)`: exactly that permission in exactly that `Scope` (`{Authority, ID}`, such as the group that administers a merchant), checked live.
-- `CheckRecentSignIn(ctx)`: nil when a person signed in recently enough to move money or grant access; `ErrStepUpRequired` asks them to sign in again (an `*auth.Challenge` gives `MaxAge` and the provider's `Metadata`); `ErrForbidden` for a credential with no sign-in of its own.
-
-A `Verified` may also implement `Bound` (`BoundScope()`): the one scope its credential acts in, such as a group's API key, a trusted issuer's token for its group or a person's token exchanged for one group, and the zero `Scope` for a person's own sign-in. A library serving one scope's resources admits there only a credential bound to that scope. A bound credential holds nothing outside its scope, except that a person's still holds their `root:` permissions in the `RootScope`: a person keeps their root role whatever group a token names. An application's never does.
-
-A `Verified` may implement `Asserted` (`Asserted() bool`): true only when an application's assertion named its own user and was exchanged for this credential (the RFC 7523 JWT bearer grant), such as a merchant backend's token for its customer. Sessions, API keys, resource token exchanges and a trusted issuer's own tokens are not asserted. Without the capability, the credential is not asserted.
-
-An `Authenticator` may also implement `Root` (`RootScope(ctx)`): the scope its root permissions (`root:<resource>:<action>`) are held in, such as AuthKit's root group. A library checks a `root:` permission there, so its host configures no scope. It may also implement `PermissionCatalog` (`KnownPermission`), so a library refuses a misspelled permission when it mounts, and `Headers` (`AllowedHeaders()`, `ExposedHeaders()`): the request headers its credentials are sent in (`Authorization`, `DPoP`) and the response headers its challenges set (`WWW-Authenticate`, `DPoP-Nonce`). A library merges them into its CORS lists and never names a provider's headers itself.
-
-Errors classify with `errors.Is`: `ErrUnauthenticated` (with `ErrExpired`, `ErrRevoked` or `ErrSenderProofRequired`), `ErrForbidden`, `ErrStepUpRequired`, `ErrUnavailable`. `auth.Refuse(r, err)` is the answer every consumer gives: 401 with an RFC 6750 challenge (`DPoP` scheme for a DPoP-bound request), 401 `insufficient_user_authentication` with `max_age` for a step-up (RFC 9470), 403 for `ErrForbidden`, and 503 for `ErrUnavailable` or anything unclassified. A `Challenge`'s `Header` (a DPoP nonce) is set on it. Consumers write their own body and never show provider error text.
-
-A host checks its implementation in its own CI with `authtest.Check(t, authenticator, authtest.Cases{Scope, Permissions, Staff, User, ...})`: staff holding the permissions, a user holding none, optionally single-permission holders, a stale sign-in, an application, a credential `Bound` to the scope and a `Foreign` one bound to another, `BoundStaff` (Staff's sign-in bound to another scope, which keeps its `root:` permissions in the `RootScope`), an `Asserted` credential minted from an application's assertion, refused credentials and a `Revoke` hook. A zero `Scope` is the authenticator's `RootScope`. It fails on anything admitted that must be refused, any grant outside the exact scope and permission, a `RootScope` that fails or changes, a `root:` permission held outside it, an application reading as a person or as signed in, a bound scope misreported, an assertion credential not reported as `Asserted` or any other credential reported as asserted, and an error that does not classify as the contract says. With `Headers`, it also fails on a header Staff's credential is sent in that is not allowed, or a header a refusal's `Challenge` carries that is not exposed.
-
-## User info
-
-`userinfo.Lookup` is the host's directory read in process, so a library (OpenRails) reaches people without importing the host (AuthKit) or copying its data. `Get(ctx, ids)` returns each held id's `User` (`ID`, the subject the host's auth reports; `Email`, `Name`, `Username`); an id the directory does not hold is absent, not an error. `Search(ctx, query, limit)` returns up to `limit` users whose email, username or name contains `query` as literal text, ignoring case. Values are current at read time; the caller keeps no copy. A host checks its implementation in its own CI with `userinfotest.Check(t, lookup, userinfotest.Fixtures{...})`, giving people its directory holds, optionally ids it does not hold and a `Change` hook that proves reads are current.
+These packages are removed from helpers in v1.11.0; there are no forwarding aliases. Update hosts and consuming libraries together because their `Identity`, `Scope`, `Credential`, `User` and related interfaces now have different Go package identities. Existing helpers tags remain available for applications that have not migrated. See [AuthKit's migration instructions](https://github.com/open-rails/authkit/blob/v1.24.0/docs/contract-packages.md).
 
 ## SMTP
 
