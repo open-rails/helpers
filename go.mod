@@ -5,6 +5,7 @@ go 1.26.6
 require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/maypok86/otter/v2 v2.3.1-0.20261012174237-6b4979235160
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/riverqueue/river v0.47.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.47.0
