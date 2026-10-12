@@ -31,11 +31,15 @@ type Recipient struct {
 
 // Origin preserves a producer's deployment, namespace and stable item ID.
 // Scope can identify a merchant, project or account issuer. Each recipient
-// receives at most one item for the same Origin in one local store scope.
+// receives at most one item for the same System, Scope and ID in one local
+// store scope; Subject is optional provenance, not part of that identity.
 type Origin struct {
 	System string `json:"system"`
 	Scope  string `json:"scope"`
 	ID     string `json:"id"`
+	// Subject is the source recipient, when the destination maps it to a
+	// different local identity. It grants no authority by itself.
+	Subject string `json:"subject,omitempty"`
 }
 
 // Status is independent of read state. A general notice has no workflow;
@@ -71,10 +75,12 @@ type Input struct {
 type Item struct {
 	ID string `json:"id"`
 	Input
-	ReadAt     *time.Time `json:"read_at"`
-	ResolvedAt *time.Time `json:"resolved_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	Revision   int64      `json:"revision"`
+	ReadAt *time.Time `json:"read_at"`
+	// DismissedAt archives this recipient's receipt without resolving work.
+	DismissedAt *time.Time `json:"dismissed_at"`
+	ResolvedAt  *time.Time `json:"resolved_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	Revision    int64      `json:"revision"`
 }
 
 // Errors are stable outcomes of validation, scoped lookup and concurrent edits.
@@ -100,6 +106,9 @@ func Validate(in Input) (Input, error) {
 	}
 	if !validText(in.Origin.System) || !validText(in.Origin.Scope) || !validText(in.Origin.ID) || !validText(in.Kind) || len(in.Severity) > 64 || strings.ContainsRune(in.Severity, 0) || in.CreatedAt.IsZero() {
 		return in, fmt.Errorf("%w: origin, kind and created time are required", ErrInvalid)
+	}
+	if in.Origin.Subject != "" && !validText(in.Origin.Subject) {
+		return in, fmt.Errorf("%w: source subject", ErrInvalid)
 	}
 	if in.Status != StatusNotice && in.Status != StatusOpen {
 		return in, fmt.Errorf("%w: publish status must be notice or open", ErrInvalid)
@@ -128,6 +137,8 @@ type ListOptions struct {
 	Cursor     string
 	UnreadOnly bool
 	Status     *Status
+	// Dismissed selects archived receipts instead of the active inbox.
+	Dismissed bool
 }
 
 // Page is a bounded page; NextCursor is empty at the end of a current scan.

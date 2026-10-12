@@ -75,7 +75,7 @@ func TestPublishRetryReadAndResolutionAreIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.SetRead(ctx, in.Recipient, n.ID, true); err != nil {
+	if _, err = s.SetRead(ctx, in.Recipient, n.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	page, err := s.List(ctx, in.Recipient, notify.ListOptions{})
@@ -104,7 +104,7 @@ func TestPublishRetryReadAndResolutionAreIndependent(t *testing.T) {
 	if duplicate.ID != n.ID || duplicate.Status != notify.StatusResolved || !strings.Contains(string(duplicate.Data), "9007199254740993") {
 		t.Fatalf("retry reset state/content: %+v", duplicate)
 	}
-	if err = s.SetRead(ctx, in.Recipient, n.ID, false); err != nil {
+	if _, err = s.SetRead(ctx, in.Recipient, n.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	page, _ = s.List(ctx, in.Recipient, notify.ListOptions{UnreadOnly: true})
@@ -216,10 +216,10 @@ func TestScopeAudienceRecipientIsolationAndPagination(t *testing.T) {
 	if _, err = s.List(ctx, op.Recipient, notify.ListOptions{Cursor: page.NextCursor}); !errors.Is(err, notify.ErrInvalid) {
 		t.Fatalf("cross audience cursor: %v", err)
 	}
-	if err = other.SetRead(ctx, in.Recipient, first.ID, true); !errors.Is(err, notify.ErrNotFound) {
+	if _, err = other.SetRead(ctx, in.Recipient, first.ID, true); !errors.Is(err, notify.ErrNotFound) {
 		t.Fatalf("foreign scope mutation: %v", err)
 	}
-	if err = s.SetRead(ctx, op.Recipient, first.ID, true); !errors.Is(err, notify.ErrNotFound) {
+	if _, err = s.SetRead(ctx, op.Recipient, first.ID, true); !errors.Is(err, notify.ErrNotFound) {
 		t.Fatalf("foreign audience mutation: %v", err)
 	}
 	if _, err = s.List(ctx, in.Recipient, notify.ListOptions{UnreadOnly: true, Cursor: page.NextCursor}); !errors.Is(err, notify.ErrInvalid) {
@@ -303,7 +303,7 @@ func TestClassificationMigrationKeepsOlderWorkflowProducersWorking(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `ALTER TABLE `+s.table+` DROP COLUMN action_requested; DELETE FROM `+pgx.Identifier{schema, "notify_migrations"}.Sanitize()+` WHERE version=2`); err != nil {
+	if _, err = pool.Exec(ctx, `ALTER TABLE `+s.table+` DROP COLUMN action_requested, DROP COLUMN source_subject, DROP COLUMN dismissed_at; DELETE FROM `+pgx.Identifier{schema, "notify_migrations"}.Sanitize()+` WHERE version>=2`); err != nil {
 		t.Fatal(err)
 	}
 	if err = Migrate(ctx, pool, schema); err != nil {
@@ -322,7 +322,7 @@ func TestClassificationMigrationKeepsOlderWorkflowProducersWorking(t *testing.T)
 		t.Fatalf("upgrade lost items: %+v", page)
 	}
 	for _, n := range page.Items {
-		if !n.ActionRequested || n.Status != notify.StatusOpen {
+		if !n.ActionRequested || n.Status != notify.StatusOpen || n.Origin.Subject != "" || n.DismissedAt != nil {
 			t.Fatalf("workflow category lost: %+v", n)
 		}
 	}

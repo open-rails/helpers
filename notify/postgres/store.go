@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,11 +39,11 @@ func New(pool *pgxpool.Pool, cfg Config) (*Store, error) {
 	return &Store{pool: pool, scope: cfg.Scope, table: name + `.notify_items`, recipients: name + `.notify_recipients`}, nil
 }
 
-const columns = `id,audience,recipient,source,source_scope,source_id,kind,data,created_at,read_at,status,severity,resolved_at,updated_at,revision,action_requested`
+const columns = `id,audience,recipient,source,source_scope,source_id,kind,data,created_at,read_at,status,severity,resolved_at,updated_at,revision,action_requested,source_subject,dismissed_at`
 
 func scan(row pgx.Row) (notify.Item, error) {
 	var n notify.Item
-	err := row.Scan(&n.ID, &n.Recipient.Audience, &n.Recipient.ID, &n.Origin.System, &n.Origin.Scope, &n.Origin.ID, &n.Kind, &n.Data, &n.CreatedAt, &n.ReadAt, &n.Status, &n.Severity, &n.ResolvedAt, &n.UpdatedAt, &n.Revision, &n.ActionRequested)
+	err := row.Scan(&n.ID, &n.Recipient.Audience, &n.Recipient.ID, &n.Origin.System, &n.Origin.Scope, &n.Origin.ID, &n.Kind, &n.Data, &n.CreatedAt, &n.ReadAt, &n.Status, &n.Severity, &n.ResolvedAt, &n.UpdatedAt, &n.Revision, &n.ActionRequested, &n.Origin.Subject, &n.DismissedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return n, notify.ErrNotFound
 	}
@@ -100,7 +102,7 @@ func (s *Store) PublishTx(ctx context.Context, tx pgx.Tx, in notify.Input) (noti
 	if erased {
 		return notify.Item{}, notify.ErrRecipientErased
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO `+s.table+`(scope,id,audience,recipient,source,source_scope,source_id,kind,data,created_at,status,severity,action_requested) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(scope,audience,recipient,source,source_scope,source_id) DO NOTHING`, s.scope, rand.Text(), in.Recipient.Audience, in.Recipient.ID, in.Origin.System, in.Origin.Scope, in.Origin.ID, in.Kind, in.Data, in.CreatedAt, in.Status, in.Severity, in.ActionRequested)
+	_, err = tx.Exec(ctx, `INSERT INTO `+s.table+`(scope,id,audience,recipient,source,source_scope,source_id,kind,data,created_at,status,severity,action_requested,source_subject) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(scope,audience,recipient,source,source_scope,source_id) DO NOTHING`, s.scope, rand.Text(), in.Recipient.Audience, in.Recipient.ID, in.Origin.System, in.Origin.Scope, in.Origin.ID, in.Kind, in.Data, in.CreatedAt, in.Status, in.Severity, in.ActionRequested, in.Origin.Subject)
 	if err != nil {
 		return notify.Item{}, fmt.Errorf("notify: publish: %w", err)
 	}
@@ -108,19 +110,29 @@ func (s *Store) PublishTx(ctx context.Context, tx pgx.Tx, in notify.Input) (noti
 }
 
 type cursor struct {
-	Scope     string
-	Recipient notify.Recipient
-	Unread    bool
-	Status    *notify.Status
-	At        time.Time
-	ID        string
+	Scope      string
+	Recipients string
+	Unread     bool
+	Status     *notify.Status
+	Dismissed  bool
+	At         time.Time
+	ID         string
 }
 
 // List reads one authorized recipient's inbox, newest first. Restart scans from
 // an empty cursor to discover late commits; cursors are not delivery watermarks.
 func (s *Store) List(ctx context.Context, r notify.Recipient, o notify.ListOptions) (notify.Page, error) {
+	return s.ListRecipients(ctx, []notify.Recipient{r}, o)
+}
+
+// ListRecipients reads only the recipients the host authorized for this request.
+// Filtering happens in SQL before pagination, so an unlinked recipient consumes
+// no page slots. Empty recipients returns an empty page. Cursors bind the
+// normalized recipient set and filters; restart paging after access changes.
+func (s *Store) ListRecipients(ctx context.Context, recipients []notify.Recipient, o notify.ListOptions) (notify.Page, error) {
 	out := notify.Page{Items: []notify.Item{}}
-	if err := notify.ValidateRecipient(r); err != nil {
+	audiences, ids, key, err := recipientSet(recipients)
+	if err != nil {
 		return out, err
 	}
 	if o.Limit < 0 || o.Limit > 100 {
@@ -138,15 +150,18 @@ func (s *Store) List(ctx context.Context, r notify.Recipient, o notify.ListOptio
 			return out, fmt.Errorf("%w: cursor", notify.ErrInvalid)
 		}
 		b, err := base64.RawURLEncoding.DecodeString(o.Cursor)
-		if err != nil || json.Unmarshal(b, &c) != nil || c.Scope != s.scope || c.Recipient != r || c.Unread != o.UnreadOnly || !sameStatus(c.Status, o.Status) || c.At.IsZero() || c.ID == "" {
+		if err != nil || json.Unmarshal(b, &c) != nil || c.Scope != s.scope || c.Recipients != key || c.Unread != o.UnreadOnly || c.Dismissed != o.Dismissed || !sameStatus(c.Status, o.Status) || c.At.IsZero() || c.ID == "" {
 			return out, fmt.Errorf("%w: cursor", notify.ErrInvalid)
 		}
+	}
+	if len(ids) == 0 {
+		return out, nil
 	}
 	var at *time.Time
 	if o.Cursor != "" {
 		at = &c.At
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND audience=$2 AND recipient=$3 AND (NOT $4 OR read_at IS NULL) AND ($5::text IS NULL OR status=$5) AND ($6::timestamptz IS NULL OR (created_at,id)<($6,$7)) ORDER BY created_at DESC,id DESC LIMIT $8`, s.scope, r.Audience, r.ID, o.UnreadOnly, o.Status, at, c.ID, o.Limit+1)
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND (NOT $4 OR read_at IS NULL) AND ($5::text IS NULL OR status=$5) AND ($6::timestamptz IS NULL OR (created_at,id)<($6,$7)) AND (dismissed_at IS NOT NULL)=$9 ORDER BY created_at DESC,id DESC LIMIT $8`, s.scope, audiences, ids, o.UnreadOnly, o.Status, at, c.ID, o.Limit+1, o.Dismissed)
 	if err != nil {
 		return out, fmt.Errorf("notify: list: %w", err)
 	}
@@ -164,10 +179,41 @@ func (s *Store) List(ctx context.Context, r notify.Recipient, o notify.ListOptio
 	if len(out.Items) > o.Limit {
 		out.Items = out.Items[:o.Limit]
 		last := out.Items[len(out.Items)-1]
-		b, _ := json.Marshal(cursor{s.scope, r, o.UnreadOnly, o.Status, last.CreatedAt, last.ID})
+		b, _ := json.Marshal(cursor{Scope: s.scope, Recipients: key, Unread: o.UnreadOnly, Status: o.Status, Dismissed: o.Dismissed, At: last.CreatedAt, ID: last.ID})
 		out.NextCursor = base64.RawURLEncoding.EncodeToString(b)
 	}
 	return out, nil
+}
+
+func recipientSet(in []notify.Recipient) ([]string, []string, string, error) {
+	if len(in) > 10000 {
+		return nil, nil, "", fmt.Errorf("%w: at most 10000 authorized recipients", notify.ErrInvalid)
+	}
+	set := make(map[notify.Recipient]struct{}, len(in))
+	for _, r := range in {
+		if err := notify.ValidateRecipient(r); err != nil {
+			return nil, nil, "", err
+		}
+		set[r] = struct{}{}
+	}
+	rs := make([]notify.Recipient, 0, len(set))
+	for r := range set {
+		rs = append(rs, r)
+	}
+	sort.Slice(rs, func(i, j int) bool {
+		if rs[i].Audience != rs[j].Audience {
+			return rs[i].Audience < rs[j].Audience
+		}
+		return rs[i].ID < rs[j].ID
+	})
+	audiences, ids := make([]string, 0, len(rs)), make([]string, 0, len(rs))
+	for _, r := range rs {
+		audiences = append(audiences, string(r.Audience))
+		ids = append(ids, r.ID)
+	}
+	b, _ := json.Marshal(rs)
+	digest := sha256.Sum256(b)
+	return audiences, ids, fmt.Sprintf("%x", digest), nil
 }
 
 func sameStatus(a, b *notify.Status) bool {
@@ -178,18 +224,8 @@ func validStatus(v notify.Status) bool {
 }
 
 // SetRead changes only local read state. It never resolves an actionable item.
-func (s *Store) SetRead(ctx context.Context, r notify.Recipient, id string, read bool) error {
-	if err := notify.ValidateRecipient(r); err != nil {
-		return err
-	}
-	tag, err := s.pool.Exec(ctx, `UPDATE `+s.table+` SET read_at=CASE WHEN $5 THEN coalesce(read_at,clock_timestamp()) ELSE NULL END,updated_at=CASE WHEN (read_at IS NOT NULL)=$5 THEN updated_at ELSE clock_timestamp() END,revision=revision+CASE WHEN (read_at IS NOT NULL)=$5 THEN 0 ELSE 1 END WHERE scope=$1 AND audience=$2 AND recipient=$3 AND id=$4`, s.scope, r.Audience, r.ID, id, read)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return notify.ErrNotFound
-	}
-	return nil
+func (s *Store) SetRead(ctx context.Context, r notify.Recipient, id string, read bool) (notify.Item, error) {
+	return s.SetReadRecipients(ctx, []notify.Recipient{r}, id, read)
 }
 
 // Transition changes workflow state under optimistic concurrency. The caller
