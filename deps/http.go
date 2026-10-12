@@ -82,15 +82,15 @@ func (s *Supervisor) Counter(name, help string) *Counter {
 // Label is one Prometheus label of a Sample.
 type Label struct{ Name, Value string }
 
-// Sample is one labelled value of a GaugeFunc.
+// Sample is one labelled value of a GaugeFunc or CounterFunc.
 type Sample struct {
 	Labels []Label
 	Value  float64
 }
 
 type gaugeFunc struct {
-	name, help string
-	fn         func() []Sample
+	name, help, typ string
+	fn              func() []Sample
 }
 
 // GaugeFunc exports fn's samples as a gauge on /metrics, read at scrape time
@@ -98,6 +98,16 @@ type gaugeFunc struct {
 // metric name not already exported; fn must be cheap and safe for concurrent
 // use. Samples with an invalid label name are skipped.
 func (s *Supervisor) GaugeFunc(name, help string, fn func() []Sample) error {
+	return s.addFunc(name, help, "gauge", fn)
+}
+
+// CounterFunc is GaugeFunc for labelled counters kept elsewhere (e.g. cache
+// Stats): fn returns their cumulative values.
+func (s *Supervisor) CounterFunc(name, help string, fn func() []Sample) error {
+	return s.addFunc(name, help, "counter", fn)
+}
+
+func (s *Supervisor) addFunc(name, help, typ string, fn func() []Sample) error {
 	if !metricName.MatchString(name) {
 		return fmt.Errorf("deps: invalid metric name %q", name)
 	}
@@ -108,7 +118,7 @@ func (s *Supervisor) GaugeFunc(name, help string, fn func() []Sample) error {
 		slices.ContainsFunc(s.gauges, func(g gaugeFunc) bool { return g.name == name }) {
 		return fmt.Errorf("deps: metric %q is already exported", name)
 	}
-	s.gauges = append(s.gauges, gaugeFunc{name: name, help: help, fn: fn})
+	s.gauges = append(s.gauges, gaugeFunc{name: name, help: help, typ: typ, fn: fn})
 	return nil
 }
 
@@ -146,7 +156,7 @@ func (s *Supervisor) Metrics(w http.ResponseWriter, _ *http.Request) {
 	gauges := slices.Clone(s.gauges)
 	s.mu.Unlock()
 	for _, g := range gauges {
-		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n", g.name, helpEscaper.Replace(g.help), g.name)
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s %s\n", g.name, helpEscaper.Replace(g.help), g.name, g.typ)
 	samples:
 		for _, sm := range g.fn() {
 			for _, l := range sm.Labels {
