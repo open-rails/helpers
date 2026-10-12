@@ -11,6 +11,7 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
 | `github.com/open-rails/helpers/river` | Initialize River tables and compose one host-owned client | River and pgx |
 | `github.com/open-rails/helpers/deps` | Dependency supervision, Redis client, fallback switch, probe/status/metrics handlers | go-redis |
+| `github.com/open-rails/helpers/cache` | Batch-first in-memory read-through cache for library clients | otter |
 
 Import only the packages an application needs. The API core does not import Gin or River. Go builds the imported packages and their dependencies; all packages share this module's version and Go/toolchain requirements.
 
@@ -57,7 +58,32 @@ When importing both the helpers and upstream River, use a descriptive alias such
 
 `deps.NewRedis(RedisConfig)` returns a `redis.UniversalClient` without dialing: `master_name` with `sentinel_addrs` gives a Sentinel failover client (the Sentinel password defaults to `password`), otherwise one of `addrs` gives a plain client and several a cluster client. `AddRedis` registers it as optional; its probe writes a short-lived key, so a primary that refuses writes (`NOREPLICAS`, `READONLY`) is down too.
 
-HTTP: `Gate()` is the application listener's handler and can bind before the application is built. It serves `/livez` (always 200, never checks dependencies) and `/readyz` (200 once `Open(app)` is called, 503 after `Drain()`), and returns 503 for everything else until `Open`. `OpsHandler()` adds `/statusz` (JSON per dependency) and `/metrics` (`app_ready`, `app_dependency_up{dependency,class}`, `app_dependency_transitions_total`, `Counter`s, and `GaugeFunc` gauges read at scrape time; names are validated and unique, label values escaped) for an internal port.
+HTTP: `Gate()` is the application listener's handler and can bind before the application is built. It serves `/livez` (always 200, never checks dependencies) and `/readyz` (200 once `Open(app)` is called, 503 after `Drain()`), and returns 503 for everything else until `Open`. `OpsHandler()` adds `/statusz` (JSON per dependency) and `/metrics` (`app_ready`, `app_dependency_up{dependency,class}`, `app_dependency_transitions_total`, `Counter`s, `GaugeFunc` gauges and `CounterFunc` counters read at scrape time; names are validated and unique, label values escaped) for an internal port.
+
+## Cache
+
+`cache.New(cache.Options{...}, load)` returns a `*cache.Cache[K, V]` in front of `load(ctx, keys) (map[K]V, error)`; a key absent from the map is not found and is not cached. It holds mechanics only: the caller sets `Name`, `RefreshAfter` and `MaxStale` (required, `0 < RefreshAfter < MaxStale`); `LoadTimeout` (10s), `FailureBackoff` (5s), `MaxEntries` (10,000) and `Clock` (real time) default.
+
+- `Get(ctx, keys)` loads only missing keys, once across concurrent callers and overlapping batches. Loads run detached from the caller's cancellation, bounded by `LoadTimeout`; each caller still returns at its own deadline, and the load is still cached.
+- After `RefreshAfter` the cached value is served while one background reload runs. A failed reload keeps the last good value until `MaxStale` after the last good load and retries at most once per `FailureBackoff`. A failed load of a key without a value returns that same error, without loading, for `FailureBackoff`.
+- `Refresh(ctx, keys)` reloads now, joining an in-flight load, and waits; a failure keeps and returns the cached value with the error, and a not-found key is dropped.
+- `Invalidate(keys...)`/`InvalidateAll()` win over in-flight loads and refreshes and clear recorded failures. `Close()` stops the background expiry goroutine of a cache being discarded; the cache still works after it.
+
+Reload failures are logged with `slog` (`cache=<Name>`). `cache.Snapshot()` returns per-`Name` counts for the process (hits, misses, stale serves, loads, load failures); export them with `deps.CounterFunc`:
+
+```go
+sup.CounterFunc("app_cache_events_total", "Cache events by cache name.", func() []deps.Sample {
+	var out []deps.Sample
+	for _, s := range cache.Snapshot() {
+		for event, n := range map[string]uint64{"hit": s.Hits, "miss": s.Misses, "stale": s.StaleServes, "load": s.Loads, "load_failure": s.LoadFailures} {
+			out = append(out, deps.Sample{Labels: []deps.Label{{"cache", s.Name}, {"event", event}}, Value: float64(n)})
+		}
+	}
+	return out
+})
+```
+
+The package wraps [otter v2](https://github.com/maypok86/otter) at a main-branch pseudo-version with the refresh-versus-invalidate and waiter-context fixes missing from v2.3.0; move to v2.4.0 once it is tagged.
 
 ## Migration
 
