@@ -213,11 +213,12 @@ func (s *Sender) session(ctx context.Context, do func(*smtp.Client) error) error
 		return fmt.Errorf("smtp: %w", err)
 	}
 	defer conn.Close()
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	// One timeout owner: closing the raw transport after ctx ends unblocks
+	// SMTP and TLS with ctx.Err already set. A parallel socket deadline can
+	// win that race and hide context.DeadlineExceeded behind a network timeout.
+	raw := conn
+	stop := context.AfterFunc(ctx, func() { _ = raw.Close() })
 	defer stop()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
 	if s.implicit {
 		tc := tls.Client(conn, s.tls)
 		if err := tc.HandshakeContext(ctx); err != nil {
