@@ -21,7 +21,7 @@ func (s *Store) GetRecipients(ctx context.Context, rs []notify.Recipient, id str
 	if len(ids) == 0 {
 		return notify.Item{}, notify.ErrNotFound
 	}
-	return scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND id=$4`, s.scope, audiences, ids, id))
+	return scan(s.pool.QueryRow(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND id=$4 `+s.readFilter(5), append([]any{s.scope, audiences, ids, id}, s.readArgs()...)...))
 }
 
 // SetReadRecipients updates authorized receipt state and returns the canonical
@@ -34,7 +34,7 @@ func (s *Store) SetReadRecipients(ctx context.Context, rs []notify.Recipient, id
 	if len(ids) == 0 {
 		return notify.Item{}, notify.ErrNotFound
 	}
-	return scan(s.pool.QueryRow(ctx, `UPDATE `+s.table+` SET read_at=CASE WHEN $5 THEN coalesce(read_at,clock_timestamp()) ELSE NULL END,updated_at=CASE WHEN (read_at IS NOT NULL)=$5 THEN updated_at ELSE clock_timestamp() END,revision=revision+CASE WHEN (read_at IS NOT NULL)=$5 THEN 0 ELSE 1 END WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND id=$4 RETURNING `+columns, s.scope, audiences, ids, id, read))
+	return scan(s.pool.QueryRow(ctx, `UPDATE `+s.table+` SET read_at=CASE WHEN $5 THEN coalesce(read_at,clock_timestamp()) ELSE NULL END,updated_at=CASE WHEN (read_at IS NOT NULL)=$5 THEN updated_at ELSE clock_timestamp() END,revision=revision+CASE WHEN (read_at IS NOT NULL)=$5 THEN 0 ELSE 1 END WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND id=$4 `+s.readFilter(6)+` RETURNING `+columns, append([]any{s.scope, audiences, ids, id, read}, s.readArgs()...)...))
 }
 
 // SetDismissed archives or restores a recipient's receipt, independently of
@@ -53,5 +53,5 @@ func (s *Store) SetDismissedRecipients(ctx context.Context, rs []notify.Recipien
 	if len(ids) == 0 {
 		return notify.Item{}, notify.ErrNotFound
 	}
-	return scan(s.pool.QueryRow(ctx, `UPDATE `+s.table+` SET dismissed_at=CASE WHEN $5 THEN coalesce(dismissed_at,clock_timestamp()) ELSE NULL END,updated_at=CASE WHEN (dismissed_at IS NOT NULL)=$5 THEN updated_at ELSE clock_timestamp() END,revision=revision+CASE WHEN (dismissed_at IS NOT NULL)=$5 THEN 0 ELSE 1 END WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND id=$4 RETURNING `+columns, s.scope, audiences, ids, id, dismissed))
+	return scan(s.pool.QueryRow(ctx, `UPDATE `+s.table+` SET dismissed_at=CASE WHEN $5 THEN coalesce(dismissed_at,clock_timestamp()) ELSE NULL END,updated_at=CASE WHEN (dismissed_at IS NOT NULL)=$5 THEN updated_at ELSE clock_timestamp() END,revision=revision+CASE WHEN (dismissed_at IS NOT NULL)=$5 THEN 0 ELSE 1 END WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND id=$4 `+s.readFilter(6)+` RETURNING `+columns, append([]any{s.scope, audiences, ids, id, dismissed}, s.readArgs()...)...))
 }

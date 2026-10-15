@@ -42,6 +42,31 @@ type Origin struct {
 	Subject string `json:"subject,omitempty"`
 }
 
+// OriginScope selects all items from one exact producer namespace. It is
+// separate from recipient authorization and never grants access to an account.
+type OriginScope struct {
+	System string `json:"system" yaml:"system"`
+	Scope  string `json:"scope" yaml:"scope"`
+}
+
+// Visibility identifies where a receipt may be presented; Origin remains
+// provenance and replay identity. Empty visibility means an unclassified
+// legacy item, never an implicit tenant-wide grant in an AppView.
+type Visibility string
+
+const (
+	VisibilityTenant Visibility = "tenant"
+	VisibilityApp    Visibility = "app"
+)
+
+// AppView presents tenant-wide receipts and one exact application's receipts.
+// LegacyOrigins is an explicit compatibility allowance for unclassified rows.
+// A nil or empty allowance admits no legacy origins.
+type AppView struct {
+	AppID         string
+	LegacyOrigins []OriginScope
+}
+
 // Status is independent of read state. A general notice has no workflow;
 // actionable items begin open and are explicitly resolved or dismissed.
 type Status string
@@ -57,12 +82,14 @@ const (
 // contain only fields the recipient may see. CreatedAt is the source time.
 // Publish accepts StatusNotice or StatusOpen; workflow transitions are separate.
 type Input struct {
-	Recipient Recipient       `json:"recipient"`
-	Origin    Origin          `json:"origin"`
-	Kind      string          `json:"kind"`
-	Data      json.RawMessage `json:"data"`
-	CreatedAt time.Time       `json:"created_at"`
-	Status    Status          `json:"status,omitempty"`
+	Recipient  Recipient       `json:"recipient"`
+	Origin     Origin          `json:"origin"`
+	Kind       string          `json:"kind"`
+	Data       json.RawMessage `json:"data"`
+	CreatedAt  time.Time       `json:"created_at"`
+	Visibility Visibility      `json:"visibility,omitempty"`
+	AppID      string          `json:"app_id,omitempty"`
+	Status     Status          `json:"status,omitempty"`
 	// ActionRequested records the item's category at creation. With empty Status
 	// it is historical information, not a claim that the issue is still open.
 	ActionRequested bool   `json:"action_requested,omitempty"`
@@ -109,6 +136,18 @@ func Validate(in Input) (Input, error) {
 	}
 	if in.Origin.Subject != "" && !validText(in.Origin.Subject) {
 		return in, fmt.Errorf("%w: source subject", ErrInvalid)
+	}
+	switch in.Visibility {
+	case "", VisibilityTenant:
+		if in.AppID != "" {
+			return in, fmt.Errorf("%w: app ID requires app visibility", ErrInvalid)
+		}
+	case VisibilityApp:
+		if !validText(in.AppID) {
+			return in, fmt.Errorf("%w: app visibility requires app ID", ErrInvalid)
+		}
+	default:
+		return in, fmt.Errorf("%w: visibility", ErrInvalid)
 	}
 	if in.Status != StatusNotice && in.Status != StatusOpen {
 		return in, fmt.Errorf("%w: publish status must be notice or open", ErrInvalid)

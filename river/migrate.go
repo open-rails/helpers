@@ -31,13 +31,10 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, schema string) err
 	if pool == nil {
 		return errors.New("riverkit: host pool is required")
 	}
-	if schema == "" {
-		schema = "public"
-	}
-	// River v0.47 prefixes its notification channels with the schema. Preserve
-	// its identifier rules and avoid PostgreSQL's silent identifier truncation.
-	if len(schema) > 63-len(".river_leadership") || !migrationSchemaName.MatchString(schema) {
-		return fmt.Errorf("riverkit: invalid River schema %q", schema)
+	var err error
+	schema, err = validatedMigrationSchema(schema)
+	if err != nil {
+		return err
 	}
 	lock, err := pgx.ConnectConfig(ctx, pool.Config().ConnConfig.Copy())
 	if err != nil {
@@ -60,6 +57,47 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, schema string) err
 	}
 	if _, err := migrator.Migrate(ctx, rivermigrate.DirectionUp, nil); err != nil {
 		return fmt.Errorf("riverkit: apply migrations: %w", err)
+	}
+	return nil
+}
+
+func validatedMigrationSchema(schema string) (string, error) {
+	if schema == "" {
+		schema = "public"
+	}
+	// River notification channels include the schema in a PostgreSQL identifier.
+	if len(schema) > 63-len(".river_leadership") || !migrationSchemaName.MatchString(schema) {
+		return "", fmt.Errorf("riverkit: invalid River schema %q", schema)
+	}
+	return schema, nil
+}
+
+// ValidateMigrations checks the configured River schema without creating a
+// schema, acquiring a migration lock, or applying any migration.
+func ValidateMigrations(ctx context.Context, pool *pgxpool.Pool, schema string) error {
+	if ctx == nil {
+		return errors.New("riverkit: context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if pool == nil {
+		return errors.New("riverkit: host pool is required")
+	}
+	schema, err := validatedMigrationSchema(schema)
+	if err != nil {
+		return err
+	}
+	migrator, err := rivermigrate.New(riverpgxv5.New(pool), &rivermigrate.Config{Schema: schema})
+	if err != nil {
+		return fmt.Errorf("riverkit: construct validator: %w", err)
+	}
+	result, err := migrator.Validate(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("riverkit: schema %q requires migration; run ApplyMigrations: %w", schema, err)
+	}
+	if !result.OK {
+		return fmt.Errorf("riverkit: schema %q requires migration; run ApplyMigrations: %v", schema, result.Messages)
 	}
 	return nil
 }

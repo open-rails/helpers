@@ -303,7 +303,7 @@ func TestClassificationMigrationKeepsOlderWorkflowProducersWorking(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `ALTER TABLE `+s.table+` DROP COLUMN action_requested, DROP COLUMN source_subject, DROP COLUMN dismissed_at; DELETE FROM `+pgx.Identifier{schema, "notify_migrations"}.Sanitize()+` WHERE version>=2`); err != nil {
+	if _, err = pool.Exec(ctx, `ALTER TABLE `+s.table+` DROP COLUMN action_requested, DROP COLUMN source_subject, DROP COLUMN dismissed_at, DROP COLUMN visibility CASCADE, DROP COLUMN app_id CASCADE; DELETE FROM `+pgx.Identifier{schema, "notify_migrations"}.Sanitize()+` WHERE version>=2`); err != nil {
 		t.Fatal(err)
 	}
 	if err = Migrate(ctx, pool, schema); err != nil {

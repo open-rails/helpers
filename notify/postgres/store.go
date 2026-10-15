@@ -18,13 +18,29 @@ import (
 )
 
 // Config binds a store to one local application/tenant scope in a migrated schema.
-type Config struct{ Schema, Scope string }
+type Config struct {
+	Schema, Scope string
+	// Origins, when non-nil, restricts reads and receipt mutations to exact
+	// producer namespaces. nil retains the unrestricted legacy behavior.
+	// Publication and account erasure cover the whole shared store.
+	Origins []notify.OriginScope
+	// AppView is the trusted application presentation boundary. It is distinct
+	// from producer provenance. Do not combine with the legacy Origins filter.
+	AppView *notify.AppView
+}
 
 // Store retains notices and actionable items. Scope and recipients are data
 // isolation boundaries; authorization remains with the host.
 type Store struct {
-	pool                     *pgxpool.Pool
-	scope, table, recipients string
+	pool                        *pgxpool.Pool
+	scope, table, recipients    string
+	appErasures                 string
+	origins                     []notify.OriginScope
+	originSystems, originScopes []string
+	originsKey                  string
+	appView                     *notify.AppView
+	appViewKey                  string
+	legacySystems, legacyScopes []string
 }
 
 // New binds an existing pool; it neither migrates nor opens connections.
@@ -36,14 +52,26 @@ func New(pool *pgxpool.Pool, cfg Config) (*Store, error) {
 	if pool == nil || strings.TrimSpace(cfg.Scope) == "" || len(cfg.Scope) > 512 || strings.ContainsRune(cfg.Scope, 0) {
 		return nil, fmt.Errorf("%w: pool and scope required", notify.ErrInvalid)
 	}
-	return &Store{pool: pool, scope: cfg.Scope, table: name + `.notify_items`, recipients: name + `.notify_recipients`}, nil
+	origins, systems, scopes, key, err := originSet(cfg.Origins)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.AppView != nil && cfg.Origins != nil {
+		return nil, fmt.Errorf("%w: combine app view with legacy origins through AppView.LegacyOrigins", notify.ErrInvalid)
+	}
+	view, legacySystems, legacyScopes, viewKey, err := appView(cfg.AppView)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{pool: pool, scope: cfg.Scope, table: name + `.notify_items`, recipients: name + `.notify_recipients`, appErasures: name + `.notify_app_erasures`, origins: origins, originSystems: systems, originScopes: scopes, originsKey: key, appView: view, legacySystems: legacySystems, legacyScopes: legacyScopes, appViewKey: viewKey}, nil
 }
 
-const columns = `id,audience,recipient,source,source_scope,source_id,kind,data,created_at,read_at,status,severity,resolved_at,updated_at,revision,action_requested,source_subject,dismissed_at`
+const legacyColumns = `id,audience,recipient,source,source_scope,source_id,kind,data,created_at,read_at,status,severity,resolved_at,updated_at,revision,action_requested,source_subject,dismissed_at`
+const columns = legacyColumns + `,visibility,app_id`
 
 func scan(row pgx.Row) (notify.Item, error) {
 	var n notify.Item
-	err := row.Scan(&n.ID, &n.Recipient.Audience, &n.Recipient.ID, &n.Origin.System, &n.Origin.Scope, &n.Origin.ID, &n.Kind, &n.Data, &n.CreatedAt, &n.ReadAt, &n.Status, &n.Severity, &n.ResolvedAt, &n.UpdatedAt, &n.Revision, &n.ActionRequested, &n.Origin.Subject, &n.DismissedAt)
+	err := row.Scan(&n.ID, &n.Recipient.Audience, &n.Recipient.ID, &n.Origin.System, &n.Origin.Scope, &n.Origin.ID, &n.Kind, &n.Data, &n.CreatedAt, &n.ReadAt, &n.Status, &n.Severity, &n.ResolvedAt, &n.UpdatedAt, &n.Revision, &n.ActionRequested, &n.Origin.Subject, &n.DismissedAt, &n.Visibility, &n.AppID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return n, notify.ErrNotFound
 	}
@@ -95,6 +123,9 @@ func (s *Store) PublishTx(ctx context.Context, tx pgx.Tx, in notify.Input) (noti
 	if tx == nil {
 		return notify.Item{}, fmt.Errorf("%w: transaction required", notify.ErrInvalid)
 	}
+	if !s.visible(notify.Item{Input: in}) {
+		return notify.Item{}, fmt.Errorf("%w: publication outside app view", notify.ErrInvalid)
+	}
 	erased, err := s.lock(ctx, tx, in.Recipient)
 	if err != nil {
 		return notify.Item{}, err
@@ -102,16 +133,30 @@ func (s *Store) PublishTx(ctx context.Context, tx pgx.Tx, in notify.Input) (noti
 	if erased {
 		return notify.Item{}, notify.ErrRecipientErased
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO `+s.table+`(scope,id,audience,recipient,source,source_scope,source_id,kind,data,created_at,status,severity,action_requested,source_subject) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(scope,audience,recipient,source,source_scope,source_id) DO NOTHING`, s.scope, rand.Text(), in.Recipient.Audience, in.Recipient.ID, in.Origin.System, in.Origin.Scope, in.Origin.ID, in.Kind, in.Data, in.CreatedAt, in.Status, in.Severity, in.ActionRequested, in.Origin.Subject)
+	if erased, err := s.appErased(ctx, tx, in); err != nil {
+		return notify.Item{}, err
+	} else if erased {
+		return notify.Item{}, notify.ErrRecipientErased
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO `+s.table+`(scope,id,audience,recipient,source,source_scope,source_id,kind,data,created_at,status,severity,action_requested,source_subject,visibility,app_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(scope,audience,recipient,source,source_scope,source_id) DO NOTHING`, s.scope, rand.Text(), in.Recipient.Audience, in.Recipient.ID, in.Origin.System, in.Origin.Scope, in.Origin.ID, in.Kind, in.Data, in.CreatedAt, in.Status, in.Severity, in.ActionRequested, in.Origin.Subject, in.Visibility, in.AppID)
 	if err != nil {
 		return notify.Item{}, fmt.Errorf("notify: publish: %w", err)
 	}
-	return scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND audience=$2 AND recipient=$3 AND source=$4 AND source_scope=$5 AND source_id=$6`, s.scope, in.Recipient.Audience, in.Recipient.ID, in.Origin.System, in.Origin.Scope, in.Origin.ID))
+	stored, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND audience=$2 AND recipient=$3 AND source=$4 AND source_scope=$5 AND source_id=$6`, s.scope, in.Recipient.Audience, in.Recipient.ID, in.Origin.System, in.Origin.Scope, in.Origin.ID))
+	if err == nil && stored.Visibility != "" && in.Visibility != "" && (stored.Visibility != in.Visibility || stored.AppID != in.AppID) {
+		return notify.Item{}, fmt.Errorf("%w: origin visibility differs", notify.ErrConflict)
+	}
+	if err == nil && !s.visible(stored) {
+		return notify.Item{}, notify.ErrNotFound
+	}
+	return stored, err
 }
 
 type cursor struct {
 	Scope      string
 	Recipients string
+	Origins    string
+	AppView    string
 	Unread     bool
 	Status     *notify.Status
 	Dismissed  bool
@@ -150,7 +195,7 @@ func (s *Store) ListRecipients(ctx context.Context, recipients []notify.Recipien
 			return out, fmt.Errorf("%w: cursor", notify.ErrInvalid)
 		}
 		b, err := base64.RawURLEncoding.DecodeString(o.Cursor)
-		if err != nil || json.Unmarshal(b, &c) != nil || c.Scope != s.scope || c.Recipients != key || c.Unread != o.UnreadOnly || c.Dismissed != o.Dismissed || !sameStatus(c.Status, o.Status) || c.At.IsZero() || c.ID == "" {
+		if err != nil || json.Unmarshal(b, &c) != nil || c.Scope != s.scope || c.Recipients != key || c.Origins != s.originsKey || c.AppView != s.appViewKey || c.Unread != o.UnreadOnly || c.Dismissed != o.Dismissed || !sameStatus(c.Status, o.Status) || c.At.IsZero() || c.ID == "" {
 			return out, fmt.Errorf("%w: cursor", notify.ErrInvalid)
 		}
 	}
@@ -161,7 +206,7 @@ func (s *Store) ListRecipients(ctx context.Context, recipients []notify.Recipien
 	if o.Cursor != "" {
 		at = &c.At
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND (NOT $4 OR read_at IS NULL) AND ($5::text IS NULL OR status=$5) AND ($6::timestamptz IS NULL OR (created_at,id)<($6,$7)) AND (dismissed_at IS NOT NULL)=$9 ORDER BY created_at DESC,id DESC LIMIT $8`, s.scope, audiences, ids, o.UnreadOnly, o.Status, at, c.ID, o.Limit+1, o.Dismissed)
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND (NOT $4 OR read_at IS NULL) AND ($5::text IS NULL OR status=$5) AND ($6::timestamptz IS NULL OR (created_at,id)<($6,$7)) AND (dismissed_at IS NOT NULL)=$9 `+s.readFilter(10)+` ORDER BY created_at DESC,id DESC LIMIT $8`, append([]any{s.scope, audiences, ids, o.UnreadOnly, o.Status, at, c.ID, o.Limit + 1, o.Dismissed}, s.readArgs()...)...)
 	if err != nil {
 		return out, fmt.Errorf("notify: list: %w", err)
 	}
@@ -179,7 +224,7 @@ func (s *Store) ListRecipients(ctx context.Context, recipients []notify.Recipien
 	if len(out.Items) > o.Limit {
 		out.Items = out.Items[:o.Limit]
 		last := out.Items[len(out.Items)-1]
-		b, _ := json.Marshal(cursor{Scope: s.scope, Recipients: key, Unread: o.UnreadOnly, Status: o.Status, Dismissed: o.Dismissed, At: last.CreatedAt, ID: last.ID})
+		b, _ := json.Marshal(cursor{Scope: s.scope, Recipients: key, Origins: s.originsKey, AppView: s.appViewKey, Unread: o.UnreadOnly, Status: o.Status, Dismissed: o.Dismissed, At: last.CreatedAt, ID: last.ID})
 		out.NextCursor = base64.RawURLEncoding.EncodeToString(b)
 	}
 	return out, nil
@@ -259,7 +304,7 @@ func (s *Store) TransitionTx(ctx context.Context, tx pgx.Tx, r notify.Recipient,
 	if erased {
 		return notify.Item{}, notify.ErrRecipientErased
 	}
-	current, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND audience=$2 AND recipient=$3 AND id=$4 FOR UPDATE`, s.scope, r.Audience, r.ID, id))
+	current, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND audience=$2 AND recipient=$3 AND id=$4 `+s.readFilter(5)+` FOR UPDATE`, append([]any{s.scope, r.Audience, r.ID, id}, s.readArgs()...)...))
 	if err != nil {
 		return current, err
 	}
@@ -302,4 +347,39 @@ func (s *Store) EraseRecipientTx(ctx context.Context, tx pgx.Tx, r notify.Recipi
 	}
 	_, err := tx.Exec(ctx, `DELETE FROM `+s.table+` WHERE scope=$1 AND audience=$2 AND recipient=$3`, s.scope, r.Audience, r.ID)
 	return err
+}
+
+// originSet normalizes filters so cursors survive harmless ordering changes.
+func originSet(in []notify.OriginScope) ([]notify.OriginScope, []string, []string, string, error) {
+	if in == nil {
+		return nil, nil, nil, "", nil
+	}
+	if len(in) > 1000 {
+		return nil, nil, nil, "", fmt.Errorf("%w: at most 1000 origin scopes", notify.ErrInvalid)
+	}
+	set := map[notify.OriginScope]bool{}
+	for _, o := range in {
+		if strings.TrimSpace(o.System) == "" || strings.TrimSpace(o.Scope) == "" || len(o.System) > 512 || len(o.Scope) > 512 || strings.ContainsRune(o.System, 0) || strings.ContainsRune(o.Scope, 0) {
+			return nil, nil, nil, "", fmt.Errorf("%w: origin scope", notify.ErrInvalid)
+		}
+		set[o] = true
+	}
+	origins := make([]notify.OriginScope, 0, len(set))
+	for o := range set {
+		origins = append(origins, o)
+	}
+	sort.Slice(origins, func(i, j int) bool {
+		if origins[i].System != origins[j].System {
+			return origins[i].System < origins[j].System
+		}
+		return origins[i].Scope < origins[j].Scope
+	})
+	systems, scopes := []string{}, []string{}
+	for _, o := range origins {
+		systems = append(systems, o.System)
+		scopes = append(scopes, o.Scope)
+	}
+	b, _ := json.Marshal(origins)
+	digest := sha256.Sum256(b)
+	return origins, systems, scopes, fmt.Sprintf("%x", digest), nil
 }

@@ -17,6 +17,8 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+var migrationPaths = []string{"migrations/001_inbox.sql", "migrations/002_action_requested.sql", "migrations/003_receipt_state.sql", "migrations/004_app_visibility.sql", "migrations/005_app_erasure.sql"}
+
 func schemaName(schema string) (string, error) {
 	if schema == "" || len(schema) > 63 || strings.TrimSpace(schema) != schema || strings.ContainsRune(schema, 0) {
 		return "", fmt.Errorf("notify: a nonempty PostgreSQL schema is required")
@@ -84,7 +86,7 @@ func migrate(ctx context.Context, schema string, exec func(string, ...any) error
 	}
 	// Older readers coexist with additive future migrations. Each version and
 	// its ledger entry commit atomically under the migration lock.
-	for i, path := range []string{"migrations/001_inbox.sql", "migrations/002_action_requested.sql", "migrations/003_receipt_state.sql"} {
+	for i, path := range migrationPaths {
 		version := i + 1
 		if version <= v {
 			continue
