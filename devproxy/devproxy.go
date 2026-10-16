@@ -101,7 +101,9 @@ func defaults(c Config) Config {
 		c.DrainTimeout = 30 * time.Second
 	}
 	if c.StopTimeout <= 0 {
-		c.StopTimeout = 10 * time.Second
+		// HTTP may take 20s to drain, followed by bounded worker/resource
+		// cleanup. Leave enough time for interrupted jobs to be acknowledged.
+		c.StopTimeout = 45 * time.Second
 	}
 	if c.Output == nil {
 		c.Output = os.Stderr

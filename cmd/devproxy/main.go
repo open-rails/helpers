@@ -52,7 +52,7 @@ func run() error {
 		flags.StringVar(&cfg.Listen, "listen", "127.0.0.1:2052", "stable public HTTP listener")
 		flags.DurationVar(&cfg.ReadyTimeout, "ready-timeout", 0, "candidate readiness deadline (default 60s)")
 		flags.DurationVar(&cfg.DrainTimeout, "drain-timeout", 0, "old requests/WebSocket drain deadline (default 30s)")
-		flags.DurationVar(&cfg.StopTimeout, "stop-timeout", 0, "graceful process-group shutdown deadline (default 10s)")
+		flags.DurationVar(&cfg.StopTimeout, "stop-timeout", 0, "graceful process-group shutdown deadline (default 45s)")
 		if err := flags.Parse(os.Args[2:]); err != nil {
 			return err
 		}

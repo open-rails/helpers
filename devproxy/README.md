@@ -33,7 +33,11 @@ with their old generation. The proxy preserves the original Host, handles
 HTTP upgrades, and does not retry requests after an upstream disconnect.
 `--drain-timeout` bounds old requests, including long-lived upgraded connections
 (default 30s); after that they close. Then every old process group receives
-SIGTERM, followed by SIGKILL after `--stop-timeout` (default 10s). The readiness
+SIGTERM, followed by SIGKILL after `--stop-timeout` (default 45s). Applications
+should interrupt background jobs as shutdown begins, keep their database
+connections open until the queue acknowledges them, and drain HTTP before
+closing dependencies. The budget allows a 20s HTTP drain and 20s of cleanup;
+it is still a hard limit for a process that ignores cancellation. The readiness
 deadline is `--ready-timeout` (default 60s).
 
 The deploy command exits after promotion and does not own the server process.
