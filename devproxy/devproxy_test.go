@@ -35,6 +35,25 @@ func TestProxyProcess(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		os.Exit(18)
 	}
+	if len(os.Args) > 1 && os.Args[len(os.Args)-1] == "escaped-companion" {
+		// Like a Docker-supervising worker: TERM is handled late, and a client in
+		// its own process group keeps the generation's output pipe open.
+		signal.Ignore(syscall.SIGTERM)
+		self, _ := os.Executable()
+		cmd := exec.Command(self, "-test.run=^TestProxyProcess$", "--", "grandchild")
+		cmd.Env = os.Environ()
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(os.Getenv("DEVPROXY_TEST_ESCAPED"), []byte(fmt.Sprint(cmd.Process.Pid)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
 	if len(os.Args) > 1 && os.Args[len(os.Args)-1] == "companion" {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, syscall.SIGTERM)
@@ -475,5 +494,139 @@ func TestCanceledQueuedDeploymentDoesNotReplaceHealthyCandidate(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if got := r.get("/"); !strings.HasPrefix(got, "slow|") {
 		t.Fatal("canceled candidate superseded a healthy deployment:", got)
+	}
+}
+
+func readPID(t *testing.T, marker string) int {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if data, err := os.ReadFile(marker); err == nil && len(data) > 0 {
+			var pid int
+			if _, err := fmt.Sscan(string(data), &pid); err != nil {
+				t.Fatal(err)
+			}
+			return pid
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("marker not written")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitGone(t *testing.T, pid int, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if os.IsNotExist(err) || (err == nil && strings.Contains(string(data), ") Z ")) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("process %d survived its generation", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestEscapedDescendantCannotWedgeLaterDeploys(t *testing.T) {
+	r := newRig(t, 300*time.Millisecond, time.Second)
+	marker := filepath.Join(t.TempDir(), "escaped")
+	bad := r.deployment("never-ready", "DEVPROXY_TEST_BAD=1", "DEVPROXY_TEST_ESCAPED="+marker)
+	bad.Companions = [][]string{{"-test.run=^TestProxyProcess$", "--", "escaped-companion"}}
+	failed := make(chan error, 1)
+	start := time.Now()
+	go func() { _, err := Deploy(r.ctx, r.control, bad); failed <- err }()
+	pid := readPID(t, marker)
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	select {
+	case err := <-failed:
+		if err == nil {
+			t.Fatal("never-ready candidate promoted")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("failed deploy waited on its candidate's cleanup")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("failed deploy took %v", elapsed)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := Deploy(r.ctx, r.control, r.deployment("good")); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("deploy blocked behind a failed candidate's cleanup")
+	}
+	if got := r.get("/"); !strings.HasPrefix(got, "good|") {
+		t.Fatal(got)
+	}
+	// The escaped client dies with its candidate and the cleanup completes.
+	waitGone(t, pid, 10*time.Second)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		status, err := Inspect(r.ctx, r.control)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(status.Stopping) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("failed generation never finished stopping: %+v", status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestDisconnectedClientReleasesDeploymentPromptly(t *testing.T) {
+	r := newRig(t, 30*time.Second, time.Second)
+	ctx, cancel := context.WithTimeout(r.ctx, 200*time.Millisecond)
+	defer cancel()
+	if _, err := Deploy(ctx, r.control, r.deployment("slow", "DEVPROXY_TEST_DELAY=30s")); err == nil {
+		t.Fatal("abandoned deployment succeeded")
+	}
+	done := make(chan error, 1)
+	go func() { _, err := Deploy(r.ctx, r.control, r.deployment("next")); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("abandoned deployment kept the deploy lock")
+	}
+}
+
+func TestStatusReportsDeploymentInProgress(t *testing.T) {
+	r := newRig(t, 5*time.Second, time.Second)
+	done := make(chan error, 1)
+	go func() {
+		_, err := Deploy(r.ctx, r.control, r.deployment("slow", "DEVPROXY_TEST_DELAY=600ms"))
+		done <- err
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		status, err := Inspect(r.ctx, r.control)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.Deploying != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("status never reported the in-progress deployment")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	status, err := Inspect(r.ctx, r.control)
+	if err != nil || status.Deploying != 0 || !status.Healthy {
+		t.Fatalf("after promotion: %+v %v", status, err)
 	}
 }

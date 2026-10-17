@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,17 +52,26 @@ type Status struct {
 	Generation uint64 `json:"generation"`
 	Port       int    `json:"port"`
 	Healthy    bool   `json:"healthy"`
+	// Deploying is the candidate awaiting readiness; Stopping lists retired or
+	// failed generations whose processes are still being stopped.
+	Deploying uint64   `json:"deploying,omitempty"`
+	Stopping  []uint64 `json:"stopping,omitempty"`
 }
 
 type supervisor struct {
-	cfg      Config
-	ctx      context.Context
-	deployMu sync.Mutex
-	mu       sync.Mutex // protects active selection and additions to its request group
-	active   *generation
-	all      map[*generation]bool
-	next     uint64
+	cfg       Config
+	ctx       context.Context
+	deployMu  sync.Mutex
+	mu        sync.Mutex // protects active selection and additions to its request group
+	active    *generation
+	all       map[*generation]bool
+	next      uint64
+	deploying uint64
 }
+
+// waitDelay bounds Wait after a process exits when an escaped descendant still
+// holds its output pipe.
+const waitDelay = 5 * time.Second
 
 type generation struct {
 	result     Result
@@ -209,11 +219,17 @@ func (s *supervisor) controlHandler() http.Handler {
 	})
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
-		status := Status{PID: os.Getpid()}
+		status := Status{PID: os.Getpid(), Deploying: s.deploying}
 		if g := s.active; g != nil {
-			status = Status{PID: os.Getpid(), Generation: g.result.Generation, Port: g.result.Port, Healthy: !g.failed.Load()}
+			status.Generation, status.Port, status.Healthy = g.result.Generation, g.result.Port, !g.failed.Load()
+		}
+		for g := range s.all {
+			if g != s.active && g.result.Generation != s.deploying {
+				status.Stopping = append(status.Stopping, g.result.Generation)
+			}
 		}
 		s.mu.Unlock()
+		slices.Sort(status.Stopping)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)
 	})
@@ -234,7 +250,16 @@ func (s *supervisor) deploy(ctx context.Context, d Deployment) (Result, error) {
 	stop := context.AfterFunc(s.ctx, cancel)
 	defer stop()
 	s.next++
-	g, err := s.launch(d, s.next)
+	id := s.next
+	s.mu.Lock()
+	s.deploying = id
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.deploying = 0
+		s.mu.Unlock()
+	}()
+	g, err := s.launch(d, id)
 	if err != nil {
 		return Result{}, err
 	}
@@ -244,7 +269,8 @@ func (s *supervisor) deploy(ctx context.Context, d Deployment) (Result, error) {
 	promoted := false
 	defer func() {
 		if !promoted {
-			s.stop(g)
+			// Stopping takes up to StopTimeout; never hold the deploy lock for it.
+			go s.stop(g)
 		}
 	}()
 	if err := waitReady(ctx, g); err != nil {
@@ -323,6 +349,7 @@ func (s *supervisor) launch(d Deployment, id uint64) (_ *generation, err error) 
 		cmd.Dir = d.Directory
 		cmd.Env = processEnvironment(d.Environment, port, g.readyToken)
 		cmd.Stdout, cmd.Stderr = s.cfg.Output, s.cfg.Output
+		cmd.WaitDelay = waitDelay
 		prepareProcess(cmd)
 		if err = cmd.Start(); err != nil {
 			return nil, err
@@ -393,36 +420,50 @@ func (s *supervisor) drain(g *generation) {
 
 func (s *supervisor) stop(g *generation) {
 	g.stopOnce.Do(func() {
+		// Group signals miss descendants that left the group (a Docker client,
+		// say). Record them while the parent chain still leads to them.
+		var escaped []proc
 		for _, c := range g.children {
+			if c.cmd.Process != nil {
+				escaped = append(escaped, descendants(c.cmd.Process.Pid)...)
+			}
 			signalProcess(c.cmd, false)
 		}
 		deadline := time.Now().Add(s.cfg.StopTimeout)
-		for {
-			alive := false
-			for _, c := range g.children {
-				alive = processGroupAlive(c.cmd) || alive
-			}
-			if !alive {
-				break
-			}
-			if time.Now().After(deadline) {
-				// A leader may already have exited while a grandchild ignores
-				// TERM. Kill the groups, not only still-running direct children.
-				for _, c := range g.children {
-					signalProcess(c.cmd, true)
-				}
-				break
-			}
+		for time.Now().Before(deadline) && (groupsAlive(g) || slices.ContainsFunc(escaped, procAlive)) {
 			time.Sleep(10 * time.Millisecond)
 		}
+		// A leader may already have exited while a grandchild ignores TERM, so
+		// kill the groups and every recorded descendant, not only direct children.
 		for _, c := range g.children {
-			<-c.done
+			if c.cmd.Process != nil && processGroupAlive(c.cmd) {
+				escaped = append(escaped, descendants(c.cmd.Process.Pid)...)
+			}
+			signalProcess(c.cmd, true)
+		}
+		killProcs(escaped)
+		reaped := time.Now().Add(waitDelay + time.Second)
+		for _, c := range g.children {
+			select {
+			case <-c.done:
+			case <-time.After(time.Until(reaped)):
+				fmt.Fprintf(s.cfg.Output, "devproxy generation %d: process %d was not reaped\n", g.result.Generation, c.cmd.Process.Pid)
+			}
 		}
 		_ = os.RemoveAll(g.dir)
 		s.mu.Lock()
 		delete(s.all, g)
 		s.mu.Unlock()
 	})
+}
+
+func groupsAlive(g *generation) bool {
+	for _, c := range g.children {
+		if processGroupAlive(c.cmd) {
+			return true
+		}
+	}
+	return false
 }
 
 func unusedPort() (int, error) {

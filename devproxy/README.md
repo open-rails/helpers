@@ -40,6 +40,12 @@ closing dependencies. The budget allows a 20s HTTP drain and 20s of cleanup;
 it is still a hard limit for a process that ignores cancellation. The readiness
 deadline is `--ready-timeout` (default 60s).
 
+Descendants that moved to their own process group (a Docker client, say) get
+the same window, then SIGKILL; an escaped holder of the output pipe cannot keep
+a generation from stopping. A failed candidate is stopped in the background, so
+it never delays the next deploy. `status` reports the candidate in progress
+(`deploying`) and generations still stopping (`stopping`).
+
 The deploy command exits after promotion and does not own the server process.
 An external watcher may freely stop its old deploy command while compiling a
 new executable. Stop the supervisor itself to stop all managed generations.
