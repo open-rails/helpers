@@ -206,7 +206,16 @@ func (s *Store) ListRecipients(ctx context.Context, recipients []notify.Recipien
 	if o.Cursor != "" {
 		at = &c.At
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND (audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[])) AND (NOT $4 OR read_at IS NULL) AND ($5::text IS NULL OR status=$5) AND ($6::timestamptz IS NULL OR (created_at,id)<($6,$7)) AND (dismissed_at IS NOT NULL)=$9 `+s.readFilter(10)+` ORDER BY created_at DESC,id DESC LIMIT $8`, append([]any{s.scope, audiences, ids, o.UnreadOnly, o.Status, at, c.ID, o.Limit + 1, o.Dismissed}, s.readArgs()...)...)
+	recipientsWhere := `(audience,recipient) IN (SELECT * FROM unnest($2::text[],$3::text[]))`
+	cursorWhere := `($6::timestamptz IS NULL OR (created_at,id)<($6,$7))`
+	if len(ids) == 1 {
+		// Equality and a direct cursor let generic plans seek the inbox index.
+		recipientsWhere = `audience=($2::text[])[1] AND recipient=($3::text[])[1]`
+		if at != nil {
+			cursorWhere = `(created_at,id)<($6::timestamptz,$7)`
+		}
+	}
+	rows, err := s.pool.Query(ctx, `SELECT `+columns+` FROM `+s.table+` WHERE scope=$1 AND `+recipientsWhere+` AND (NOT $4 OR read_at IS NULL) AND ($5::text IS NULL OR status=$5) AND `+cursorWhere+` AND (dismissed_at IS NOT NULL)=$9 `+s.readFilter(10)+` ORDER BY created_at DESC,id DESC LIMIT $8`, append([]any{s.scope, audiences, ids, o.UnreadOnly, o.Status, at, c.ID, o.Limit + 1, o.Dismissed}, s.readArgs()...)...)
 	if err != nil {
 		return out, fmt.Errorf("notify: list: %w", err)
 	}
