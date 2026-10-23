@@ -6,7 +6,7 @@ and HTTP clients. No global ordering, delivery workers, registrations or ACKs.
 
 `Query` uses an opaque `After` cursor, exact `Types` (unknown values are valid),
 and `Limit` (default 100, maximum 500). Filters are sorted/deduplicated; at most
-32 input values, each 1–128 bytes after trimming. Keep the same filter when
+100 input values, each 1–128 bytes after trimming. Keep the same filter when
 resuming a cursor. `ErrInvalidCursor` means malformed/wrong-scope/wrong-filter;
 `ErrExpiredCursor` means retained history cannot continue and current state must
 be resynchronized. Product HTTP adapters map these to 400 and 410 respectively.

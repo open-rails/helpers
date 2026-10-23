@@ -15,7 +15,7 @@ import (
 const (
 	DefaultLimit     = 100
 	MaxLimit         = 500
-	MaxTypes         = 32
+	MaxTypes         = 100
 	DefaultRetention = 90 * 24 * time.Hour
 )
 

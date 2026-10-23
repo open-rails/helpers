@@ -68,7 +68,7 @@ func TestNormalizeUnknownTypesAndBounds(t *testing.T) {
 	if err != nil || q.Limit != 100 || !reflect.DeepEqual(q.Types, []string{"a", "future"}) || in[0] != " future " {
 		t.Fatalf("%#v %v", q, err)
 	}
-	for _, q := range []Query{{Limit: 501}, {Limit: -1}, {Types: []string{" "}}, {Types: make([]string, 33)}} {
+	for _, q := range []Query{{Limit: 501}, {Limit: -1}, {Types: []string{" "}}, {Types: make([]string, 101)}} {
 		if _, err := Normalize(q); !errors.Is(err, ErrInvalidQuery) {
 			t.Fatalf("accepted %#v", q)
 		}
