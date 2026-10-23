@@ -45,3 +45,18 @@ func TestPeriodicCheckpointRetention(t *testing.T) {
 		}
 	}
 }
+
+func TestExistingOverdueScheduleCatchesUpWithoutFirstRunOption(t *testing.T) {
+	now := time.Now()
+	p := &periodicInterval{every: time.Hour, last: now.Add(-2 * time.Hour), initialNext: true}
+	if next := p.Next(now); !next.Equal(now) {
+		t.Fatalf("overdue schedule was postponed: %s", next)
+	}
+	if next := p.Next(now); !next.Equal(now.Add(time.Hour)) {
+		t.Fatalf("skipped constructor would busy-loop: %s", next)
+	}
+	p.last, p.initialNext = time.Time{}, true
+	if next := p.Next(now); !next.Equal(now.Add(time.Hour)) {
+		t.Fatalf("new schedule ran before its first interval: %s", next)
+	}
+}

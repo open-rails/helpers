@@ -49,13 +49,23 @@ type periodicInterval struct {
 	last        time.Time
 	runOnStart  bool
 	startup     bool
+	initialNext bool
 }
 
 func (p *periodicInterval) Next(now time.Time) time.Time {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	initial := p.initialNext
+	p.initialNext = false
 	if due := p.last.Add(p.every); !p.last.IsZero() && due.After(now) {
 		return due
+	}
+	// An existing overdue schedule catches up even if it did not request an
+	// unconditional first run. A brand-new schedule without RunOnStart still
+	// waits its first interval. Only the first Next can take this path: a nil
+	// constructor (for example a lease held elsewhere) must not busy-loop.
+	if initial && !p.runOnStart && !p.last.IsZero() {
+		return now
 	}
 	return now.Add(p.every)
 }
@@ -142,6 +152,7 @@ func (h *periodicCheckpoint) Start(ctx context.Context, _ *rivertype.HookPeriodi
 		p.mu.Lock()
 		p.last = last[p.id]
 		p.startup = p.runOnStart
+		p.initialNext = true
 		p.mu.Unlock()
 	}
 	return nil
