@@ -2,6 +2,7 @@ package river
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -109,15 +110,18 @@ func (h *periodicCheckpoint) bind(pool *pgxpool.Pool, cfg *riverqueue.Config) er
 // never independently enqueues work. Pending and retrying jobs also count so a
 // restart cannot create a second copy while the original waits for a worker.
 func (h *periodicCheckpoint) Start(ctx context.Context, _ *rivertype.HookPeriodicJobsStartParams) error {
-	ids := make([]string, len(h.jobs))
+	filters := make([]string, len(h.jobs))
 	for i, p := range h.jobs {
-		ids[i] = p.id
+		encoded, _ := json.Marshal(map[string]string{"river:periodic_job_id": p.id})
+		filters[i] = string(encoded)
 	}
+	// Containment can use River's existing GIN metadata index; extracting the
+	// key in WHERE would scan all retained jobs on every leader change.
 	rows, err := h.pool.Query(ctx, `SELECT metadata->>'river:periodic_job_id',
 		max(greatest(created_at, attempted_at, scheduled_at))
 		FROM `+pgx.Identifier{h.schema, "river_job"}.Sanitize()+`
-		WHERE metadata->>'river:periodic_job_id'=ANY($1::text[]) AND state <> 'cancelled'
-		GROUP BY metadata->>'river:periodic_job_id'`, ids)
+		WHERE metadata @> ANY($1::jsonb[]) AND state <> 'cancelled'
+		GROUP BY metadata->>'river:periodic_job_id'`, filters)
 	if err != nil {
 		return fmt.Errorf("riverkit: read periodic checkpoints: %w", err)
 	}
