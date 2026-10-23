@@ -10,7 +10,7 @@ CREATE TABLE {{schema}}.eventlog_streams (
 );
 CREATE TABLE {{schema}}.eventlog_events (
  source text NOT NULL, scope text NOT NULL, position bigint NOT NULL,
- id text NOT NULL, event_source text NOT NULL, event_type text NOT NULL, version integer NOT NULL,
+ id text NOT NULL, boundary text NOT NULL, event_source text NOT NULL, event_type text NOT NULL, version integer NOT NULL,
  occurred_at timestamptz NOT NULL, recorded_at timestamptz NOT NULL,
  subject_type text NOT NULL, subject_id text NOT NULL, data jsonb NOT NULL,
  PRIMARY KEY(source,scope,position), UNIQUE(source,scope,id),
@@ -24,7 +24,7 @@ CREATE TABLE {{schema}}.eventlog_pending (
  ordinal bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  transaction_id xid8 NOT NULL DEFAULT pg_current_xact_id(),
  source text NOT NULL CHECK(source<>''), scope text NOT NULL CHECK(scope<>''),
- id text NOT NULL CHECK(id<>''), event_source text NOT NULL, event_type text NOT NULL CHECK(event_type<>''),
+ id text NOT NULL CHECK(id<>''), boundary text, event_source text NOT NULL, event_type text NOT NULL CHECK(event_type<>''),
  version integer NOT NULL CHECK(version>0), occurred_at timestamptz NOT NULL,
  subject_type text NOT NULL DEFAULT '', subject_id text NOT NULL DEFAULT '', data jsonb NOT NULL
 );
@@ -50,11 +50,11 @@ BEGIN
    END IF;
    RAISE EXCEPTION 'event ID already records a different fact' USING ERRCODE='23505';
   END IF;
-  UPDATE {{schema}}.eventlog_streams SET position=position+1,head_id=e.id,
+  UPDATE {{schema}}.eventlog_streams SET position=position+1,head_id=coalesce(e.boundary,e.id),
    recorded_at=greatest(recorded_at,clock_timestamp())
    WHERE source=e.source AND scope=e.scope RETURNING position,recorded_at INTO next_position,stamp;
-  INSERT INTO {{schema}}.eventlog_events(source,scope,position,id,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data)
-   VALUES(e.source,e.scope,next_position,e.id,e.event_source,e.event_type,e.version,e.occurred_at,stamp,e.subject_type,e.subject_id,e.data);
+  INSERT INTO {{schema}}.eventlog_events(source,scope,position,id,boundary,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data)
+   VALUES(e.source,e.scope,next_position,e.id,coalesce(e.boundary,e.id),e.event_source,e.event_type,e.version,e.occurred_at,stamp,e.subject_type,e.subject_id,e.data);
  END LOOP;
  DELETE FROM {{schema}}.eventlog_pending WHERE transaction_id=pg_current_xact_id();
  RETURN NULL;

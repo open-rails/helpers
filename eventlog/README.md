@@ -62,3 +62,12 @@ Hosts own pool lifetime, schema permissions and scheduling. Test PostgreSQL with
 ```sh
 EVENTLOG_TEST_DATABASE_URL=postgres://... GOWORK=off go test ./eventlog/...
 ```
+
+Products with existing data can embed `postgres.MigrationSQL(schema, 1)` verbatim
+in their own transactional migration, verify that generated segment in a contract
+test, add product-owned foreign keys, copy history unchanged and switch source
+capture in that same transaction. The shared row's internal `boundary` may differ
+from its public ID; imports must preserve both. New pending facts default their
+boundary to the ID. Imported nonmonotonic recording timestamps use a retained
+prefix for expiry/pruning plus per-row time filtering, so a later expired row
+cannot hide an earlier retained fact.

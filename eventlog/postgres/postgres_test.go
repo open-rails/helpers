@@ -293,7 +293,7 @@ func TestImportedNonmonotonicHistoryKeepsRetainedPrefix(t *testing.T) {
 	now := time.Now().UTC()
 	s.config.Now = func() time.Time { return now }
 	for i, recorded := range []time.Time{now.Add(-time.Hour), now.Add(-91 * 24 * time.Hour), now.Add(-time.Minute)} {
-		_, err := p.Exec(t.Context(), `INSERT INTO `+s.schema+`.eventlog_events(source,scope,position,id,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data) VALUES($1,$2,$3,$4,'legacy','a',1,$5,$5,'','','{}')`, s.config.Source, s.config.Scope, i+1, []string{"young-first", "expired-later", "young-last"}[i], recorded)
+		_, err := p.Exec(t.Context(), `INSERT INTO `+s.schema+`.eventlog_events(source,scope,position,id,boundary,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data) VALUES($1,$2,$3,$4,$4,'legacy','a',1,$5,$5,'','','{}')`, s.config.Source, s.config.Scope, i+1, []string{"young-first", "expired-later", "young-last"}[i], recorded)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -335,4 +335,30 @@ func TestIdenticalReplayDoesNotAllocateAnotherPosition(t *testing.T) {
 	if len(after.Events) != 0 || after.NextCursor != before.NextCursor {
 		t.Fatal("replay allocated position", after)
 	}
+}
+
+func TestIndependentStorageBoundarySurvivesPageAndPrune(t *testing.T) {
+	s, p := database(t)
+	_, err := p.Exec(t.Context(), `INSERT INTO `+s.schema+`.eventlog_pending(source,scope,id,boundary,event_source,event_type,version,occurred_at,data) VALUES($1,$2,'1','boundary-one','catalog','created',1,now(),'{}'),($1,$2,'2','boundary-two','catalog','created',1,now(),'{}')`, s.config.Source, s.config.Scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := page(t, s, eventlog.Query{Limit: 1})
+	if len(first.Events) != 1 || first.Events[0].ID != "1" {
+		t.Fatal(first)
+	}
+	c, err := (eventlog.JSONCursor{}).Decode(first.NextCursor)
+	if err != nil || c.Boundary != "boundary-one" {
+		t.Fatalf("%#v %v", c, err)
+	}
+	last := page(t, s, eventlog.Query{After: first.NextCursor})
+	if len(last.Events) != 1 || last.Events[0].ID != "2" {
+		t.Fatal(last)
+	}
+	s.config.Now = func() time.Time { return time.Now().Add(91 * 24 * time.Hour) }
+	n, err := s.Prune(t.Context(), 10)
+	if err != nil || n != 2 {
+		t.Fatalf("prune %d %v", n, err)
+	}
+	page(t, s, eventlog.Query{After: last.NextCursor})
 }
