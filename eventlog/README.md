@@ -70,4 +70,6 @@ capture in that same transaction. The shared row's internal `boundary` may diffe
 from its public ID; imports must preserve both. New pending facts default their
 boundary to the ID. Imported nonmonotonic recording timestamps use a retained
 prefix for expiry/pruning plus per-row time filtering, so a later expired row
-cannot hide an earlier retained fact.
+cannot hide an earlier retained fact. Individually expired imported rows are
+omitted even behind a younger position; this retained-only compatibility mode
+is not lossless catch-up of expired history. New writes record monotonic times.
