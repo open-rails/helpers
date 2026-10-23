@@ -12,7 +12,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 )
 
-// NewPeriodicJob is NewPeriodicJob with an interval that survives leader changes
+// NewPeriodicJob is River's NewPeriodicJob with an interval that survives leader changes
 // and restarts. RunOnStart catches up overdue work; it does not run a recent job
 // again. Add the result to cfg.PeriodicJobs and compose cfg with New.
 //
