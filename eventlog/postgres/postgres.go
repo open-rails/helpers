@@ -111,7 +111,7 @@ func (s *Store) ListEvents(ctx context.Context, q eventlog.Query) (eventlog.Page
 			return err
 		}
 		defer tx.Rollback(ctx)
-		err = fn(snapshot{s: s, tx: tx})
+		err = fn(&snapshot{s: s, tx: tx})
 		if err != nil {
 			return err
 		}
@@ -121,11 +121,13 @@ func (s *Store) ListEvents(ctx context.Context, q eventlog.Query) (eventlog.Page
 }
 
 type snapshot struct {
-	s  *Store
-	tx pgx.Tx
+	s      *Store
+	tx     pgx.Tx
+	cutoff time.Time
 }
 
-func (r snapshot) Stream(ctx context.Context, cutoff time.Time) (eventlog.Stream, error) {
+func (r *snapshot) Stream(ctx context.Context, cutoff time.Time) (eventlog.Stream, error) {
+	r.cutoff = cutoff
 	var stream eventlog.Stream
 	err := r.tx.QueryRow(ctx, `SELECT epoch,position,head_id,pruned_through,pruned_id FROM `+r.s.schema+`.eventlog_streams WHERE source=$1 AND scope=$2`, r.s.config.Source, r.s.config.Scope).Scan(&stream.Epoch, &stream.Head.Number, &stream.Head.ID, &stream.Floor.Number, &stream.Floor.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -137,7 +139,7 @@ func (r snapshot) Stream(ctx context.Context, cutoff time.Time) (eventlog.Stream
 		return stream, err
 	}
 	var floor eventlog.Position
-	err = r.tx.QueryRow(ctx, `SELECT position,id FROM `+r.s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND recorded_at<$3 ORDER BY position DESC LIMIT 1`, r.s.config.Source, r.s.config.Scope, cutoff).Scan(&floor.Number, &floor.ID)
+	err = r.tx.QueryRow(ctx, `SELECT position,id FROM `+r.s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND recorded_at<$3 AND position<coalesce((SELECT min(position) FROM `+r.s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND recorded_at>=$3),9223372036854775807) ORDER BY position DESC LIMIT 1`, r.s.config.Source, r.s.config.Scope, cutoff).Scan(&floor.Number, &floor.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return stream, err
 	}
@@ -146,7 +148,7 @@ func (r snapshot) Stream(ctx context.Context, cutoff time.Time) (eventlog.Stream
 	}
 	return stream, nil
 }
-func (r snapshot) Boundary(ctx context.Context, position int64) (string, error) {
+func (r *snapshot) Boundary(ctx context.Context, position int64) (string, error) {
 	var id string
 	err := r.tx.QueryRow(ctx, `SELECT id FROM `+r.s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND position=$3`, r.s.config.Source, r.s.config.Scope, position).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -154,8 +156,8 @@ func (r snapshot) Boundary(ctx context.Context, position int64) (string, error) 
 	}
 	return id, err
 }
-func (r snapshot) Events(ctx context.Context, after int64, types []string, limit int) ([]eventlog.Record, error) {
-	rows, err := r.tx.Query(ctx, `SELECT position,id,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data FROM `+r.s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND position>$3 AND (cardinality($4::text[])=0 OR event_type=ANY($4)) ORDER BY position LIMIT $5`, r.s.config.Source, r.s.config.Scope, after, append([]string{}, types...), limit)
+func (r *snapshot) Events(ctx context.Context, after int64, types []string, limit int) ([]eventlog.Record, error) {
+	rows, err := r.tx.Query(ctx, `SELECT position,id,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data FROM `+r.s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND position>$3 AND (cardinality($4::text[])=0 OR event_type=ANY($4)) AND recorded_at >= $6 ORDER BY position LIMIT $5`, r.s.config.Source, r.s.config.Scope, after, append([]string{}, types...), limit, r.cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +202,7 @@ func (s *Store) Prune(ctx context.Context, limit int) (int64, error) {
 		return 0, err
 	}
 	var n int64
-	err = tx.QueryRow(ctx, `WITH doomed AS (SELECT position,id FROM `+s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND recorded_at<$3 ORDER BY position LIMIT $4), boundary AS (SELECT position,id FROM doomed ORDER BY position DESC LIMIT 1), updated AS (UPDATE `+s.schema+`.eventlog_streams SET pruned_through=boundary.position,pruned_id=boundary.id FROM boundary WHERE source=$1 AND scope=$2), deleted AS (DELETE FROM `+s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND position IN (SELECT position FROM doomed) RETURNING 1) SELECT count(*) FROM deleted`, s.config.Source, s.config.Scope, now.Add(-s.config.Retention), limit).Scan(&n)
+	err = tx.QueryRow(ctx, `WITH doomed AS (SELECT position,id FROM `+s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND recorded_at<$3 AND position<coalesce((SELECT min(position) FROM `+s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND recorded_at>=$3),9223372036854775807) ORDER BY position LIMIT $4), boundary AS (SELECT position,id FROM doomed ORDER BY position DESC LIMIT 1), updated AS (UPDATE `+s.schema+`.eventlog_streams SET pruned_through=boundary.position,pruned_id=boundary.id FROM boundary WHERE source=$1 AND scope=$2), deleted AS (DELETE FROM `+s.schema+`.eventlog_events WHERE source=$1 AND scope=$2 AND position IN (SELECT position FROM doomed) RETURNING 1) SELECT count(*) FROM deleted`, s.config.Source, s.config.Scope, now.Add(-s.config.Retention), limit).Scan(&n)
 	if err != nil {
 		return 0, err
 	}
@@ -209,3 +211,20 @@ func (s *Store) Prune(ctx context.Context, limit int) (int64, error) {
 
 // NewID returns an opaque ID suitable for an event without a product-owned ID.
 func NewID() string { return rand.Text() }
+
+// MigrationSQL returns an immutable version of the shared schema for inclusion
+// in a product's transactional SQL migration. Keep the returned SQL verbatim in
+// a generated segment and verify it against this function in a contract test.
+// Products may add their own FK/cascade constraints after this segment. This
+// lets a single product migration install the engine, copy retained history and
+// switch its SQL capture atomically. Only version 1 is currently defined.
+func MigrationSQL(schema string, version int) (string, error) {
+	if version != 1 {
+		return "", fmt.Errorf("eventlog: unknown schema version %d", version)
+	}
+	name, err := schemaName(schema)
+	if err != nil {
+		return "", err
+	}
+	return "CREATE TABLE IF NOT EXISTS " + name + ".eventlog_migrations(version integer PRIMARY KEY);\n" + strings.ReplaceAll(schemaSQL, "{{schema}}", name) + "\nINSERT INTO " + name + ".eventlog_migrations(version) VALUES(1);\n", nil
+}

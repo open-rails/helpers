@@ -287,3 +287,40 @@ func TestSQLCaptureSharesDeferredQueue(t *testing.T) {
 		t.Fatalf("pending survived commit: %d %v", pending, err)
 	}
 }
+
+func TestImportedNonmonotonicHistoryKeepsRetainedPrefix(t *testing.T) {
+	s, p := database(t)
+	now := time.Now().UTC()
+	s.config.Now = func() time.Time { return now }
+	for i, recorded := range []time.Time{now.Add(-time.Hour), now.Add(-91 * 24 * time.Hour), now.Add(-time.Minute)} {
+		_, err := p.Exec(t.Context(), `INSERT INTO `+s.schema+`.eventlog_events(source,scope,position,id,event_source,event_type,version,occurred_at,recorded_at,subject_type,subject_id,data) VALUES($1,$2,$3,$4,'legacy','a',1,$5,$5,'','','{}')`, s.config.Source, s.config.Scope, i+1, []string{"young-first", "expired-later", "young-last"}[i], recorded)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := p.Exec(t.Context(), `UPDATE `+s.schema+`.eventlog_streams SET position=3,head_id='young-last' WHERE source=$1 AND scope=$2`, s.config.Source, s.config.Scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := page(t, s, eventlog.Query{Limit: 1})
+	if len(first.Events) != 1 || first.Events[0].ID != "young-first" || !first.HasMore {
+		t.Fatalf("retained earlier fact skipped: %#v", first)
+	}
+	second := page(t, s, eventlog.Query{After: first.NextCursor, Limit: 1})
+	if len(second.Events) != 1 || second.Events[0].ID != "young-last" {
+		t.Fatal(second)
+	}
+	n, err := s.Prune(t.Context(), 100)
+	if err != nil || n != 0 {
+		t.Fatalf("pruned beyond retained prefix: %d %v", n, err)
+	}
+	s.config.Now = func() time.Time { return now.Add(91 * 24 * time.Hour) }
+	n, err = s.Prune(t.Context(), 1)
+	if err != nil || n != 1 {
+		t.Fatalf("prune floor: %d %v", n, err)
+	}
+	_, err = s.ListEvents(t.Context(), eventlog.Query{After: first.NextCursor})
+	if !errors.Is(err, eventlog.ErrExpiredCursor) {
+		t.Fatalf("expired prefix cursor: %v", err)
+	}
+}
