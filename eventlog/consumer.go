@@ -9,7 +9,8 @@ import (
 )
 
 // Subscription identifies a consumer checkpoint. Changing any field selects a
-// different checkpoint. A filter change must not reuse the old cursor.
+// different checkpoint. Source names the deployment/product log, not Event.Source
+// provenance. A filter change must not reuse the old cursor.
 type Subscription struct {
 	Source, Scope, Name string
 	Types               []string
@@ -37,7 +38,8 @@ func (s Subscription) Key() (string, error) {
 // an empty cursor only for a new subscription. Commit must atomically apply
 // idempotent effects and persist page.NextCursor, conditional on the checkpoint
 // still equaling previous (or serialize consumers). It must commit empty pages,
-// too. With external effects, use event IDs as idempotency keys before saving.
+// too. With external effects, scope each event ID by subscription source and
+// scope when forming idempotency keys before saving.
 // Neither Load nor Commit is producer-side state.
 type Consumer struct {
 	Reader       Reader

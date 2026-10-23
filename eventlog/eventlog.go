@@ -28,7 +28,9 @@ var (
 // Event is a product-owned fact. IDs are opaque; only cursors define order.
 // RecordedAt is storage time; OccurredAt may describe an earlier domain event.
 type Event struct {
-	ID         string          `json:"id"`
+	ID string `json:"id"`
+	// Source is product-owned provenance (for example host or notification).
+	// It is not the log namespace and is not a global deduplication key.
 	Source     string          `json:"source"`
 	Scope      string          `json:"scope"`
 	Type       string          `json:"type"`

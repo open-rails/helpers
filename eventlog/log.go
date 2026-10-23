@@ -91,6 +91,7 @@ type Log struct {
 	// Only enable for an existing cursor contract that already omitted this check.
 	SkipFloorBoundary bool
 
+	// Source names the product/log namespace, independent of Event.Source.
 	Source       string
 	Scope        string
 	Retention    time.Duration

@@ -12,12 +12,19 @@ resuming a cursor. `ErrInvalidCursor` means malformed/wrong-scope/wrong-filter;
 be resynchronized. Product HTTP adapters map these to 400 and 410 respectively.
 `OccurredAt` is domain time; `RecordedAt` is storage time.
 
+`Log.Source` and PostgreSQL `Config.Source` name the stable product/log namespace
+(for example `openrails`). `Event.Source` preserves product provenance (`host` or
+`notification` in billing). A consumer subscription source must identify the
+deployment/product log. Deduplication keys combine that source, its scope and the
+event ID; `Event.Source` or a bare ID does not identify a fact globally.
+
 `Consumer.Poll` loads the owner's checkpoint, reads a page and calls the owner's
 commit function. The commit function applies idempotent effects and saves
 `NextCursor` atomically, comparing the previous checkpoint or serializing writers.
 Checkpoint keys include source, scope, subscription and canonical filter. Empty
 pages must also commit: their cursor can advance across irrelevant events. If
-effects are external, use event IDs for idempotency before saving the checkpoint.
+effects are external, use source/scope/event-ID keys for idempotency before
+saving the checkpoint.
 The owner controls polling, retries and resynchronization; errors never reset a
 cursor automatically.
 

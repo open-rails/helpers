@@ -64,6 +64,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, schema string) error {
 }
 
 type Config struct {
+	// Source is the stable product/log namespace; Event.Source is provenance.
 	Schema, Source, Scope string
 	Retention             time.Duration
 	Now                   func() time.Time
