@@ -29,7 +29,8 @@ type Record struct {
 // Snapshot must expose committed rows from one repeatable-read snapshot.
 // Events returns strictly increasing positions above after, filtered by exact
 // types (empty means all), with at most limit records. Head's Floor is the last
-// expired position at cutoff. Storage must order RecordedAt with positions.
+// expired position at cutoff. Legacy storage with nonmonotonic RecordedAt must compute the retained prefix
+// floor and additionally exclude expired rows in Events.
 type Snapshot interface {
 	Stream(context.Context, time.Time) (Stream, error)
 	Boundary(context.Context, int64) (string, error)
@@ -80,6 +81,10 @@ func (JSONCursor) Decode(raw string) (Cursor, error) {
 // A codec is optional for new logs; existing logs supply their legacy codec.
 // ReadSnapshot must run the callback once using a single committed snapshot.
 type Log struct {
+	// SkipFloorBoundary preserves legacy logs that never stored a pruned boundary ID.
+	// Only enable for an existing cursor contract that already omitted this check.
+	SkipFloorBoundary bool
+
 	Source       string
 	Scope        string
 	Retention    time.Duration
@@ -137,7 +142,7 @@ func (l Log) ListEvents(ctx context.Context, q Query) (Page, error) {
 					return err
 				}
 			}
-			if boundary != prior.Boundary {
+			if boundary != prior.Boundary && !(l.SkipFloorBoundary && after == stream.Floor.Number) {
 				return ErrExpiredCursor
 			}
 		}
