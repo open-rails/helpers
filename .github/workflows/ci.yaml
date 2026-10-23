@@ -17,6 +17,7 @@ jobs:
       GOWORK: 'off'
       GOMAXPROCS: '2'
       RIVER_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/helpers_test?sslmode=disable
+      EVENTLOG_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/helpers_test?sslmode=disable
       DEPS_TEST_REDIS_ADDR: 127.0.0.1:6379
       DEPS_TEST_SENTINEL_ADDR: 127.0.0.1:26379
     steps:
@@ -35,7 +36,7 @@ jobs:
         with:
           # Build and scan on the latest patched Go 1.26; go.mod keeps 1.26.6
           # as the consumers' floor.
-          go-version: '1.26.9'
+          go-version: '1.26.10'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'

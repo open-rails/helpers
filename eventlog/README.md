@@ -1,0 +1,75 @@
+# Retained events
+
+Each product owns an independent scoped log and its authentication, payloads and
+HTTP routing. A scoped `eventlog.Reader` is the consumer seam for both embedded
+and HTTP clients. No global ordering, delivery workers, registrations or ACKs.
+
+`Query` uses an opaque `After` cursor, exact `Types` (unknown values are valid),
+and `Limit` (default 100, maximum 500). Filters are sorted/deduplicated; at most
+100 input values, each 1–128 bytes after trimming. Keep the same filter when
+resuming a cursor. `ErrInvalidCursor` means malformed/wrong-scope/wrong-filter;
+`ErrExpiredCursor` means retained history cannot continue and current state must
+be resynchronized. Product HTTP adapters map these to 400 and 410 respectively.
+`OccurredAt` is domain time; `RecordedAt` is storage time.
+
+`Log.Source` and PostgreSQL `Config.Source` name the stable product/log namespace
+(for example `openrails`). `Event.Source` preserves product provenance (`host` or
+`notification` in billing). A consumer subscription source must identify the
+deployment/product log. Deduplication keys combine that source, its scope and the
+event ID; `Event.Source` or a bare ID does not identify a fact globally.
+
+`Consumer.Poll` loads the owner's checkpoint, reads a page and calls the owner's
+commit function. The commit function applies idempotent effects and saves
+`NextCursor` atomically, comparing the previous checkpoint or serializing writers.
+Checkpoint keys include source, scope, subscription and canonical filter. Empty
+pages must also commit: their cursor can advance across irrelevant events. If
+effects are external, use source/scope/event-ID keys for idempotency before
+saving the checkpoint.
+The owner controls polling, retries and resynchronization; errors never reset a
+cursor automatically.
+
+`Log` centralizes paging and retention for existing storage through `Snapshot`.
+Adapters must provide one repeatable-read snapshot and preserve their legacy
+cursor codec. `SkipFloorBoundary` exists only for legacy logs that never stored
+a pruned boundary ID; new logs must retain and validate it. Imported history must
+preserve IDs, positions, epochs, boundaries and recording timestamps. If that is
+impossible, explicitly return 410; never silently reset a cursor.
+
+## PostgreSQL
+
+`postgres.Migrate` installs versioned tables/functions in a host-created schema.
+`postgres.New` binds a namespace/source and scope. Create the initial empty stream
+with `EnsureScope` during scope provisioning (append also creates it).
+`AppendTx` queues a fact inside the mutation transaction. SQL capture triggers
+can insert the same columns into `eventlog_pending`, omitting `transaction_id`
+and `ordinal`. Never force its deferred constraint immediate or change those
+internal columns. The deferred trigger locks all touched scopes in sorted order,
+then assigns positions and monotonic recording timestamps. Rolled-back mutations
+leave no facts. An identical retained fact is an idempotent no-op. Reusing its ID with different
+content aborts the transaction; records are immutable.
+Products must never reuse an ID for a different fact, even after pruning. The log
+does not keep an unbounded ID ledger.
+
+The pending identity is only intra-transaction ordering, never a public cursor.
+There is no ordering between independent scopes. Existing SQL journal capture,
+restore suppression, scope checks and domain snapshot functions remain owned by
+the product; adopting the shared queue must preserve them.
+
+Retention defaults to 90 days and is enforced by reads even without pruning.
+Call `Prune` periodically with a bounded batch (1–10,000 rows per scoped call).
+Hosts own pool lifetime, schema permissions and scheduling. Test PostgreSQL with:
+
+```sh
+EVENTLOG_TEST_DATABASE_URL=postgres://... GOWORK=off go test ./eventlog/...
+```
+
+Products with existing data can embed `postgres.MigrationSQL(schema, 1)` verbatim
+in their own transactional migration, verify that generated segment in a contract
+test, add product-owned foreign keys, copy history unchanged and switch source
+capture in that same transaction. The shared row's internal `boundary` may differ
+from its public ID; imports must preserve both. New pending facts default their
+boundary to the ID. Imported nonmonotonic recording timestamps use a retained
+prefix for expiry/pruning plus per-row time filtering, so a later expired row
+cannot hide an earlier retained fact. Individually expired imported rows are
+omitted even behind a younger position; this retained-only compatibility mode
+is not lossless catch-up of expired history. New writes record monotonic times.
