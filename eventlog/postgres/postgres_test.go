@@ -257,3 +257,33 @@ func TestFactsImmutableAndDuplicateRollsBack(t *testing.T) {
 		t.Fatalf("epoch mismatch %v", err)
 	}
 }
+
+func TestSQLCaptureSharesDeferredQueue(t *testing.T) {
+	s, p := database(t)
+	tx, err := p.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	// This is the insert a product-owned source-journal trigger performs. It uses
+	// no Go AppendTx call, and cannot become visible before the domain commit.
+	_, err = tx.Exec(t.Context(), `INSERT INTO `+s.schema+`.eventlog_pending(source,scope,id,event_source,event_type,version,occurred_at,data) VALUES($1,$2,'sql-fact','journal','created',1,now(),'{"from":"sql"}')`, s.config.Source, s.config.Scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := page(t, s, eventlog.Query{})
+	if len(before.Events) != 0 {
+		t.Fatal("uncommitted SQL capture visible")
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	after := page(t, s, eventlog.Query{After: before.NextCursor})
+	if len(after.Events) != 1 || after.Events[0].ID != "sql-fact" || after.Events[0].Source != "journal" {
+		t.Fatalf("%#v", after)
+	}
+	var pending int
+	if err = p.QueryRow(t.Context(), `SELECT count(*) FROM `+s.schema+`.eventlog_pending`).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("pending survived commit: %d %v", pending, err)
+	}
+}
