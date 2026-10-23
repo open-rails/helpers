@@ -38,7 +38,8 @@ can insert the same columns into `eventlog_pending`, omitting `transaction_id`
 and `ordinal`. Never force its deferred constraint immediate or change those
 internal columns. The deferred trigger locks all touched scopes in sorted order,
 then assigns positions and monotonic recording timestamps. Rolled-back mutations
-leave no facts. An ID still retained in the log aborts a duplicate transaction; records are immutable.
+leave no facts. An identical retained fact is an idempotent no-op. Reusing its ID with different
+content aborts the transaction; records are immutable.
 Products must never reuse an ID for a different fact, even after pruning. The log
 does not keep an unbounded ID ledger.
 

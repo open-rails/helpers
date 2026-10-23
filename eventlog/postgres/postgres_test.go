@@ -324,3 +324,15 @@ func TestImportedNonmonotonicHistoryKeepsRetainedPrefix(t *testing.T) {
 		t.Fatalf("expired prefix cursor: %v", err)
 	}
 }
+
+func TestIdenticalReplayDoesNotAllocateAnotherPosition(t *testing.T) {
+	s, p := database(t)
+	e := fact("same", "a")
+	appendCommit(t, s, p, e, e)
+	before := page(t, s, eventlog.Query{})
+	appendCommit(t, s, p, e)
+	after := page(t, s, eventlog.Query{After: before.NextCursor})
+	if len(after.Events) != 0 || after.NextCursor != before.NextCursor {
+		t.Fatal("replay allocated position", after)
+	}
+}

@@ -29,7 +29,7 @@ CREATE TABLE {{schema}}.eventlog_pending (
  subject_type text NOT NULL DEFAULT '', subject_id text NOT NULL DEFAULT '', data jsonb NOT NULL
 );
 CREATE INDEX ON {{schema}}.eventlog_pending(transaction_id);
-CREATE FUNCTION {{schema}}.eventlog_flush() RETURNS trigger LANGUAGE plpgsql AS $fn$
+CREATE FUNCTION {{schema}}.eventlog_flush() RETURNS trigger LANGUAGE plpgsql SET search_path TO pg_catalog,pg_temp AS $fn$
 DECLARE
  s record; e record; next_position bigint; stamp timestamptz;
 BEGIN
@@ -42,6 +42,14 @@ BEGIN
  END LOOP;
  FOR e IN SELECT * FROM {{schema}}.eventlog_pending WHERE transaction_id=pg_current_xact_id() ORDER BY ordinal
  LOOP
+  IF EXISTS(SELECT 1 FROM {{schema}}.eventlog_events WHERE source=e.source AND scope=e.scope AND id=e.id) THEN
+   IF EXISTS(SELECT 1 FROM {{schema}}.eventlog_events WHERE source=e.source AND scope=e.scope AND id=e.id
+     AND event_source=e.event_source AND event_type=e.event_type AND version=e.version
+     AND occurred_at=e.occurred_at AND subject_type=e.subject_type AND subject_id=e.subject_id AND data=e.data) THEN
+    CONTINUE;
+   END IF;
+   RAISE EXCEPTION 'event ID already records a different fact' USING ERRCODE='23505';
+  END IF;
   UPDATE {{schema}}.eventlog_streams SET position=position+1,head_id=e.id,
    recorded_at=greatest(recorded_at,clock_timestamp())
    WHERE source=e.source AND scope=e.scope RETURNING position,recorded_at INTO next_position,stamp;
@@ -54,7 +62,7 @@ END $fn$;
 CREATE CONSTRAINT TRIGGER eventlog_flush_at_commit AFTER INSERT ON {{schema}}.eventlog_pending
  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION {{schema}}.eventlog_flush();
 
-CREATE FUNCTION {{schema}}.eventlog_immutable() RETURNS trigger LANGUAGE plpgsql AS $fn$
+CREATE FUNCTION {{schema}}.eventlog_immutable() RETURNS trigger LANGUAGE plpgsql SET search_path TO pg_catalog,pg_temp AS $fn$
 BEGIN
  RAISE EXCEPTION 'retained event facts are immutable';
 END $fn$;

@@ -90,7 +90,8 @@ func New(pool *pgxpool.Pool, c Config) (*Store, error) {
 
 // AppendTx queues a fact in the caller's mutation transaction. The log namespace and scope
 // come from this authorized store. Event.Source is product-owned provenance. ID must be stable on retries;
-// duplicate IDs still retained fail the transaction rather than overwrite history.
+// an identical retained fact is a no-op; a retained ID with different content fails
+// the transaction rather than overwriting history.
 // Products must never reuse an ID for a different fact, including after pruning. Direct SQL
 // source triggers may insert these same fields into eventlog_pending. Do not
 // force its deferred constraint to immediate or change transaction_id.
