@@ -141,6 +141,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, options *riverqueue.Config, jo
 		cfg.Queues = map[string]riverqueue.QueueConfig{}
 	}
 	cfg.PeriodicJobs = slices.Clone(cfg.PeriodicJobs)
+	cfg.Hooks = slices.Clone(cfg.Hooks)
 	if cfg.Workers == nil {
 		cfg.Workers = riverqueue.NewWorkers()
 	}
@@ -171,6 +172,13 @@ func New(ctx context.Context, pool *pgxpool.Pool, options *riverqueue.Config, jo
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	for _, hook := range cfg.Hooks {
+		if checkpoint, ok := hook.(*periodicCheckpoint); ok {
+			if err := checkpoint.bind(pool, &cfg); err != nil {
+				return nil, err
+			}
+		}
 	}
 	// River 0.47's constructor panics on duplicate periodic IDs. All schedules
 	// are already composed; add them through its checked API before binding or

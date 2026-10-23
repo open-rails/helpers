@@ -44,6 +44,15 @@ These packages are removed from helpers in v1.11.0; there are no forwarding alia
 
 ## River composition
 
+For interval jobs use `river.NewPeriodicJob(cfg, interval, constructor, opts)`
+and append its result to `cfg.PeriodicJobs`. `RunOnStart` then means "catch up
+if overdue": a newly elected leader reads River's existing job timestamps and
+preserves the remaining interval. Stable periodic IDs distinguish tenants and
+apps. Completed/discarded job retention is kept at least as long as the longest
+interval, so cleanup cannot erase a checkpoint before it is due. It adds no
+tables, polling jobs or background loops. Manual/event-triggered inserts and
+failed-job retries are not throttled. Cron schedules use River's native scheduler.
+
 `river.ApplyMigrations(ctx, pool, schema)` creates the selected schema and applies River's migrations under a database/schema advisory lock. An empty schema means `public`. Schema creation happens inside the lock, and the lock uses a dedicated connection so a host pool with `MaxConns=1` cannot stall itself. The host retains its pool; call this explicit initializer before starting workers or accepting requests that enqueue jobs.
 
 `river.New` combines library contributions, validates registration and binds their producers to the same ordinary River client and actual host pool. Pass the same schema in `riverqueue.Config.Schema`; empty also means `public`. Construction does not migrate or start workers. The host starts/stops that client and retains ownership of the pool. These helpers add neither a scheduler nor billing logic.
