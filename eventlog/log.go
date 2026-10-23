@@ -24,6 +24,8 @@ type Stream struct {
 type Record struct {
 	Event    Event
 	Position int64
+	// Boundary overrides Event.ID for legacy stores with independent boundary tokens.
+	Boundary string
 }
 
 // Snapshot must expose committed rows from one repeatable-read snapshot.
@@ -81,6 +83,10 @@ func (JSONCursor) Decode(raw string) (Cursor, error) {
 // A codec is optional for new logs; existing logs supply their legacy codec.
 // ReadSnapshot must run the callback once using a single committed snapshot.
 type Log struct {
+	// NormalizeQuery preserves historical filter semantics during migration.
+	// Nil uses Normalize. Legacy normalizers must retain bounded input and limits.
+	NormalizeQuery func(Query) (Query, error)
+
 	// SkipFloorBoundary preserves legacy logs that never stored a pruned boundary ID.
 	// Only enable for an existing cursor contract that already omitted this check.
 	SkipFloorBoundary bool
@@ -102,7 +108,11 @@ func (l Log) ListEvents(ctx context.Context, q Query) (Page, error) {
 	if retention < 0 || l.Source == "" || l.Scope == "" || l.ReadSnapshot == nil {
 		return page, ErrInvalidQuery
 	}
-	q, err := Normalize(q)
+	normalize := l.NormalizeQuery
+	if normalize == nil {
+		normalize = Normalize
+	}
+	q, err := normalize(q)
 	if err != nil {
 		return page, err
 	}
@@ -157,7 +167,11 @@ func (l Log) ListEvents(ctx context.Context, q Query) (Page, error) {
 				break
 			}
 			page.Events = append(page.Events, row.Event)
-			position = Position{Number: row.Position, ID: row.Event.ID}
+			boundary := row.Boundary
+			if boundary == "" {
+				boundary = row.Event.ID
+			}
+			position = Position{Number: row.Position, ID: boundary}
 		}
 		if !page.HasMore {
 			position = stream.Head
