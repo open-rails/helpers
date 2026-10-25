@@ -6,8 +6,6 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | --- | --- | --- |
 | `github.com/open-rails/helpers/api` | HTTP errors, responses, safe metadata and pagination | Standard library |
 | `github.com/open-rails/helpers/smtp` | Send email through any SMTP server (`smtptest`: an in-process server for end-to-end tests) | Standard library |
-| `github.com/open-rails/helpers/notify` | Shared general notices and actionable inbox items; read and resolution are separate | Standard library |
-| `github.com/open-rails/helpers/notify/postgres` | Durable scoped inbox, transactional publication, replay deduplication, read/workflow state and recipient erasure | pgx |
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
 | `github.com/open-rails/helpers/river` | Initialize River tables and compose one host-owned client | River and pgx |
 | `github.com/open-rails/helpers/deps` | Dependency supervision, Redis client, fallback switch, probe/status/metrics handlers | go-redis |
@@ -15,7 +13,21 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 
 Import only the packages an application needs. The API core does not import Gin or River. Go builds the imported packages and their dependencies; all packages share this module's version and Go/toolchain requirements.
 
-See the [shared inbox guide](notify/README.md) for notification producers, existing-source projections and the PostgreSQL lifecycle.
+## Account notifications
+
+The user notification inbox belongs to AuthKit. Its client creates a scoped
+`github.com/open-rails/authkit/notify.Publisher` with two methods: `Publish`
+creates or updates notifications, and `Withdraw` removes obsolete notifications.
+Both accept exact deterministic IDs, producer revisions and bounded batches.
+Pass this publisher to consuming libraries; AuthKit owns storage, delivery,
+authorization and the frontend inbox.
+
+The former `helpers/notify` and `helpers/notify/postgres` packages have moved
+into AuthKit without forwarding aliases. Update imports and the producer
+interface together. The existing database tables, migration identities and
+receipt data remain unchanged by the package move. Historical Helpers tags
+remain available for consumers that have not yet migrated. See
+[AuthKit's notification guide](https://github.com/open-rails/authkit/blob/master/docs/notifications.md).
 
 ## API helpers
 
