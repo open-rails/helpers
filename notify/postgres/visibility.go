@@ -31,7 +31,7 @@ func appView(in *notify.AppView) (*notify.AppView, []string, []string, string, e
 // readFilter is shared by lists, details, receipt mutations and workflow
 // transitions, so no alternate operation weakens the application boundary.
 func (s *Store) readFilter(start int) string {
-	return fmt.Sprintf(`AND ($%d OR (source,source_scope) IN (SELECT * FROM unnest($%d::text[],$%d::text[])))
+	return fmt.Sprintf(`AND NOT withdrawn AND ($%d OR (source,source_scope) IN (SELECT * FROM unnest($%d::text[],$%d::text[])))
  AND ($%d OR visibility='tenant' OR (visibility='app' AND app_id=$%d)
  OR (visibility='' AND (source,source_scope) IN (SELECT * FROM unnest($%d::text[],$%d::text[]))))`, start, start+1, start+2, start+3, start+4, start+5, start+6)
 }

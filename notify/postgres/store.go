@@ -67,11 +67,12 @@ func New(pool *pgxpool.Pool, cfg Config) (*Store, error) {
 }
 
 const legacyColumns = `id,audience,recipient,source,source_scope,source_id,kind,data,created_at,read_at,status,severity,resolved_at,updated_at,revision,action_requested,source_subject,dismissed_at`
-const columns = legacyColumns + `,visibility,app_id`
+const visibilityColumns = legacyColumns + `,visibility,app_id`
+const columns = visibilityColumns + `,producer_revision,withdrawn`
 
 func scan(row pgx.Row) (notify.Item, error) {
 	var n notify.Item
-	err := row.Scan(&n.ID, &n.Recipient.Audience, &n.Recipient.ID, &n.Origin.System, &n.Origin.Scope, &n.Origin.ID, &n.Kind, &n.Data, &n.CreatedAt, &n.ReadAt, &n.Status, &n.Severity, &n.ResolvedAt, &n.UpdatedAt, &n.Revision, &n.ActionRequested, &n.Origin.Subject, &n.DismissedAt, &n.Visibility, &n.AppID)
+	err := row.Scan(&n.ID, &n.Recipient.Audience, &n.Recipient.ID, &n.Origin.System, &n.Origin.Scope, &n.Origin.ID, &n.Kind, &n.Data, &n.CreatedAt, &n.ReadAt, &n.Status, &n.Severity, &n.ResolvedAt, &n.UpdatedAt, &n.Revision, &n.ActionRequested, &n.Origin.Subject, &n.DismissedAt, &n.Visibility, &n.AppID, &n.ProducerRevision, &n.Withdrawn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return n, notify.ErrNotFound
 	}

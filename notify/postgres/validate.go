@@ -51,6 +51,9 @@ func Validate(ctx context.Context, pool *pgxpool.Pool, schema string) error {
 	if _, err := pool.Exec(ctx, `SELECT `+columns+` FROM `+name+`.notify_items LIMIT 0`); err != nil {
 		return needed(err)
 	}
+	if _, err := pool.Exec(ctx, `SELECT producer_hash FROM `+name+`.notify_items LIMIT 0`); err != nil {
+		return needed(err)
+	}
 	if _, err := pool.Exec(ctx, `SELECT scope,audience,recipient,erased_at FROM `+name+`.notify_recipients LIMIT 0`); err != nil {
 		return needed(err)
 	}

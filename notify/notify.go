@@ -108,6 +108,10 @@ type Item struct {
 	ResolvedAt  *time.Time `json:"resolved_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	Revision    int64      `json:"revision"`
+	// ProducerRevision orders source mutations independently of receipt changes.
+	ProducerRevision int64 `json:"producer_revision,omitempty"`
+	// Withdrawn items are retained only to reject delayed producer mutations.
+	Withdrawn bool `json:"withdrawn,omitempty"`
 }
 
 // Errors are stable outcomes of validation, scoped lookup and concurrent edits.
@@ -128,26 +132,11 @@ func ValidateRecipient(r Recipient) error {
 
 // Validate checks a publish input and supplies an empty JSON object when omitted.
 func Validate(in Input) (Input, error) {
-	if err := ValidateRecipient(in.Recipient); err != nil {
+	if err := validateIdentity(in); err != nil {
 		return in, err
 	}
-	if !validText(in.Origin.System) || !validText(in.Origin.Scope) || !validText(in.Origin.ID) || !validText(in.Kind) || len(in.Severity) > 64 || strings.ContainsRune(in.Severity, 0) || in.CreatedAt.IsZero() {
+	if !validText(in.Kind) || len(in.Severity) > 64 || strings.ContainsRune(in.Severity, 0) || in.CreatedAt.IsZero() {
 		return in, fmt.Errorf("%w: origin, kind and created time are required", ErrInvalid)
-	}
-	if in.Origin.Subject != "" && !validText(in.Origin.Subject) {
-		return in, fmt.Errorf("%w: source subject", ErrInvalid)
-	}
-	switch in.Visibility {
-	case "", VisibilityTenant:
-		if in.AppID != "" {
-			return in, fmt.Errorf("%w: app ID requires app visibility", ErrInvalid)
-		}
-	case VisibilityApp:
-		if !validText(in.AppID) {
-			return in, fmt.Errorf("%w: app visibility requires app ID", ErrInvalid)
-		}
-	default:
-		return in, fmt.Errorf("%w: visibility", ErrInvalid)
 	}
 	if in.Status != StatusNotice && in.Status != StatusOpen {
 		return in, fmt.Errorf("%w: publish status must be notice or open", ErrInvalid)
@@ -163,6 +152,31 @@ func Validate(in Input) (Input, error) {
 		return in, fmt.Errorf("%w: data must be a JSON object up to 64 KiB", ErrInvalid)
 	}
 	return in, nil
+}
+
+func validateIdentity(in Input) error {
+	if err := ValidateRecipient(in.Recipient); err != nil {
+		return err
+	}
+	if !validText(in.Origin.System) || !validText(in.Origin.Scope) || !validText(in.Origin.ID) {
+		return fmt.Errorf("%w: origin is required", ErrInvalid)
+	}
+	if in.Origin.Subject != "" && !validText(in.Origin.Subject) {
+		return fmt.Errorf("%w: source subject", ErrInvalid)
+	}
+	switch in.Visibility {
+	case "", VisibilityTenant:
+		if in.AppID != "" {
+			return fmt.Errorf("%w: app ID requires app visibility", ErrInvalid)
+		}
+	case VisibilityApp:
+		if !validText(in.AppID) {
+			return fmt.Errorf("%w: app visibility requires app ID", ErrInvalid)
+		}
+	default:
+		return fmt.Errorf("%w: visibility", ErrInvalid)
+	}
+	return nil
 }
 
 func validText(v string) bool {

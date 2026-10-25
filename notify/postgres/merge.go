@@ -115,7 +115,7 @@ AND recipient.recipient=item.recipient AND recipient.erased_at IS NOT NULL`, s.s
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM pg_attribute WHERE attrelid=to_regclass($1) AND attname IN ('visibility','app_id') AND NOT attisdropped`, in.schema+".notify_items").Scan(&fields); err != nil {
 			return err
 		}
-		selected := columns
+		selected := visibilityColumns
 		visibility, appID := "item.visibility", "item.app_id"
 		switch fields {
 		case 0:
@@ -133,7 +133,27 @@ AND recipient.recipient=item.recipient AND recipient.erased_at IS NOT NULL`, s.s
 		default:
 			return fmt.Errorf("%w: incomplete legacy visibility schema", notify.ErrInvalid)
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO `+s.table+` AS target(scope,`+columns+`)
+		var producerFields int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM pg_attribute WHERE attrelid=to_regclass($1) AND attname IN ('producer_revision','withdrawn','producer_hash') AND NOT attisdropped`, in.schema+".notify_items").Scan(&producerFields); err != nil {
+			return err
+		}
+		switch producerFields {
+		case 0:
+			selected += `,0::bigint AS producer_revision,false AS withdrawn,NULL::bytea AS producer_hash`
+		case 3:
+			selected += `,producer_revision,withdrawn,producer_hash`
+			var conflict bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+in.schema+`.notify_items source JOIN `+s.table+` target ON target.scope=$1 AND target.audience=source.audience AND target.recipient=source.recipient AND target.source=source.source AND target.source_scope=source.source_scope AND target.source_id=source.source_id
+WHERE source.scope=$2 AND source.producer_revision>0 AND source.producer_revision=target.producer_revision AND source.producer_hash IS DISTINCT FROM target.producer_hash)`, s.scope, in.scope).Scan(&conflict); err != nil {
+				return err
+			}
+			if conflict {
+				return fmt.Errorf("%w: legacy producer revision has different content", notify.ErrConflict)
+			}
+		default:
+			return fmt.Errorf("%w: incomplete legacy producer schema", notify.ErrInvalid)
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO `+s.table+` AS target(scope,`+columns+`,producer_hash)
 SELECT $1,`+selected+` FROM `+in.schema+`.notify_items AS item WHERE scope=$2
 AND NOT EXISTS (SELECT 1 FROM `+s.recipients+` AS recipient WHERE recipient.scope=$1
  AND recipient.audience=item.audience AND recipient.recipient=item.recipient AND recipient.erased_at IS NOT NULL)
@@ -142,9 +162,17 @@ AND NOT EXISTS (SELECT 1 FROM `+s.appErasures+` f WHERE f.scope=$1 AND f.audienc
 ON CONFLICT(scope,audience,recipient,source,source_scope,source_id) DO UPDATE SET
  read_at=least(target.read_at,EXCLUDED.read_at),
  dismissed_at=least(target.dismissed_at,EXCLUDED.dismissed_at),
- status=CASE WHEN EXCLUDED.updated_at>target.updated_at THEN EXCLUDED.status ELSE target.status END,
- resolved_at=CASE WHEN EXCLUDED.updated_at>target.updated_at THEN EXCLUDED.resolved_at ELSE target.resolved_at END,
- action_requested=target.action_requested OR EXCLUDED.action_requested,
+ kind=CASE WHEN EXCLUDED.producer_revision>target.producer_revision THEN EXCLUDED.kind ELSE target.kind END,
+ data=CASE WHEN EXCLUDED.producer_revision>target.producer_revision THEN EXCLUDED.data ELSE target.data END,
+ created_at=CASE WHEN EXCLUDED.producer_revision>target.producer_revision THEN EXCLUDED.created_at ELSE target.created_at END,
+ source_subject=CASE WHEN EXCLUDED.producer_revision>target.producer_revision THEN EXCLUDED.source_subject ELSE target.source_subject END,
+ severity=CASE WHEN EXCLUDED.producer_revision>target.producer_revision THEN EXCLUDED.severity ELSE target.severity END,
+ status=CASE WHEN EXCLUDED.producer_revision>target.producer_revision OR (EXCLUDED.producer_revision=target.producer_revision AND EXCLUDED.updated_at>target.updated_at) THEN EXCLUDED.status ELSE target.status END,
+ resolved_at=CASE WHEN EXCLUDED.producer_revision>target.producer_revision OR (EXCLUDED.producer_revision=target.producer_revision AND EXCLUDED.updated_at>target.updated_at) THEN EXCLUDED.resolved_at ELSE target.resolved_at END,
+ action_requested=CASE WHEN EXCLUDED.producer_revision>target.producer_revision THEN EXCLUDED.action_requested ELSE target.action_requested OR EXCLUDED.action_requested END,
+ producer_revision=greatest(target.producer_revision,EXCLUDED.producer_revision),
+ producer_hash=CASE WHEN EXCLUDED.producer_revision>target.producer_revision THEN EXCLUDED.producer_hash ELSE target.producer_hash END,
+ withdrawn=CASE WHEN EXCLUDED.producer_revision>target.producer_revision THEN EXCLUDED.withdrawn ELSE target.withdrawn END,
  updated_at=greatest(target.updated_at,EXCLUDED.updated_at),
  revision=greatest(target.revision,EXCLUDED.revision)+1
 WHERE (target.read_at,target.dismissed_at,target.status,target.resolved_at,target.action_requested)
@@ -152,7 +180,7 @@ WHERE (target.read_at,target.dismissed_at,target.status,target.resolved_at,targe
  CASE WHEN EXCLUDED.updated_at>target.updated_at THEN EXCLUDED.status ELSE target.status END,
  CASE WHEN EXCLUDED.updated_at>target.updated_at THEN EXCLUDED.resolved_at ELSE target.resolved_at END,
  target.action_requested OR EXCLUDED.action_requested)
- OR EXCLUDED.revision>target.revision`, s.scope, in.scope)
+ OR EXCLUDED.revision>target.revision OR EXCLUDED.producer_revision>target.producer_revision`, s.scope, in.scope)
 		if err != nil {
 			return fmt.Errorf("notify: merge legacy receipts: %w", err)
 		}
