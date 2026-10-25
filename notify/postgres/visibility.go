@@ -54,7 +54,9 @@ type LegacyVisibility struct {
 // ClassifyLegacyOrigins labels only currently unclassified receipts. Run with
 // writers stopped after verifying each producer scope's ownership. A conflicting
 // explicit classification aborts the whole operation; read/archive state and IDs
-// survive. Normal Publish replay never performs this migration implicitly.
+// survive. Versioned unclassified rows require exact source-state adoption;
+// relabeling them would invalidate producer replay. Normal Publish replay never
+// performs this migration implicitly.
 func (s *Store) ClassifyLegacyOrigins(ctx context.Context, mappings []LegacyVisibility) (int64, error) {
 	unique := map[notify.OriginScope]LegacyVisibility{}
 	for _, m := range mappings {
@@ -81,6 +83,14 @@ func (s *Store) ClassifyLegacyOrigins(ctx context.Context, mappings []LegacyVisi
 	var count int64
 	for _, m := range unique {
 		var conflict bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+s.table+` WHERE scope=$1 AND source=$2 AND source_scope=$3 AND visibility='' AND producer_revision>0)`, s.scope, m.Origin.System, m.Origin.Scope).Scan(&conflict); err != nil {
+			return 0, err
+		}
+		if conflict {
+			// Classification changes the producer mutation's meaning. Only its
+			// authoritative source can supply a new revision and matching state.
+			return 0, fmt.Errorf("%w: versioned unclassified origin requires exact source-state adoption", notify.ErrConflict)
+		}
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+s.table+` WHERE scope=$1 AND source=$2 AND source_scope=$3 AND visibility<>'' AND (visibility,app_id) IS DISTINCT FROM ($4::text,$5::text))`, s.scope, m.Origin.System, m.Origin.Scope, m.Visibility, m.AppID).Scan(&conflict); err != nil {
 			return 0, err
 		}

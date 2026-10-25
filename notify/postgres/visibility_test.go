@@ -158,3 +158,51 @@ func TestMergeFromUnclassifiedOlderSchema(t *testing.T) {
 		t.Fatalf("older receipt lost %+v %v", page, err)
 	}
 }
+
+func TestClassificationRefusesVersionedUnclassifiedOriginsAtomically(t *testing.T) {
+	s, pool, _ := database(t)
+	ctx := t.Context()
+	legacy := input("legacy-classification")
+	legacy.Origin.Scope = "legacy-origin"
+	old, err := s.Publish(ctx, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versioned := notify.Mutation{Input: input("versioned-unclassified"), Revision: 1}
+	if err := s.Apply(ctx, []notify.Mutation{versioned}); err != nil {
+		t.Fatal(err)
+	}
+	var before string
+	if err := pool.QueryRow(ctx, `SELECT encode(producer_hash,'hex') FROM `+s.table+` WHERE scope=$1 AND source_id=$2`, s.scope, versioned.Origin.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	mappings := []LegacyVisibility{
+		{Origin: notify.OriginScope{System: legacy.Origin.System, Scope: legacy.Origin.Scope}, Visibility: notify.VisibilityApp, AppID: "app-a"},
+		{Origin: notify.OriginScope{System: versioned.Origin.System, Scope: versioned.Origin.Scope}, Visibility: notify.VisibilityApp, AppID: "app-a"},
+	}
+	if n, err := s.ClassifyLegacyOrigins(ctx, mappings); !errors.Is(err, notify.ErrConflict) || n != 0 {
+		t.Fatalf("classification rewrote a producer-owned mutation: count=%d err=%v", n, err)
+	}
+	var visibility, appID, after string
+	var revision, producerRevision int64
+	if err := pool.QueryRow(ctx, `SELECT visibility,app_id,revision,producer_revision,encode(producer_hash,'hex') FROM `+s.table+` WHERE scope=$1 AND source_id=$2`, s.scope, versioned.Origin.ID).Scan(&visibility, &appID, &revision, &producerRevision, &after); err != nil {
+		t.Fatal(err)
+	}
+	if visibility != "" || appID != "" || revision != 1 || producerRevision != 1 || before != after {
+		t.Fatalf("refused classification changed producer state: visibility=%q app=%q revision=%d producer=%d hash=%s, want %s", visibility, appID, revision, producerRevision, after, before)
+	}
+	retained, err := s.Get(ctx, legacy.Recipient, old.ID)
+	if err != nil || retained.Visibility != "" || retained.AppID != "" || retained.Revision != old.Revision {
+		t.Fatalf("mixed classification partly changed legacy receipt: %+v %v", retained, err)
+	}
+	if err := s.Apply(ctx, []notify.Mutation{versioned}); err != nil {
+		t.Fatalf("refused classification broke exact producer replay: %v", err)
+	}
+	if n, err := s.ClassifyLegacyOrigins(ctx, mappings[:1]); err != nil || n != 1 {
+		t.Fatalf("unversioned legacy classification stopped working: %d %v", n, err)
+	}
+	retained, err = s.Get(ctx, legacy.Recipient, old.ID)
+	if err != nil || retained.Visibility != notify.VisibilityApp || retained.AppID != "app-a" || retained.ProducerRevision != 0 {
+		t.Fatalf("legacy classification corrupted source ordering: %+v %v", retained, err)
+	}
+}
