@@ -19,6 +19,14 @@ type Mutation struct {
 	Withdrawn bool  `json:"withdrawn,omitempty"`
 }
 
+// Adoption maps exact legacy origins for Current's recipient to one current
+// producer identity during an explicit, stopped-writer migration. The host
+// authorizes the mapping; it never means a prefix, range or inbox search.
+type Adoption struct {
+	Previous []Origin `json:"previous"`
+	Current  Mutation `json:"current"`
+}
+
 // Sink durably accepts an atomic batch. Older revisions and identical retries
 // are successful no-ops; conflicting mutations at one revision return
 // ErrConflict. A nil error may mean durable queued delivery rather than a
