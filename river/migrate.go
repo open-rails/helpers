@@ -58,7 +58,7 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, schema string) err
 	if _, err := migrator.Migrate(ctx, rivermigrate.DirectionUp, nil); err != nil {
 		return fmt.Errorf("riverkit: apply migrations: %w", err)
 	}
-	return nil
+	return NotifyEveryInsert(ctx, pool, schema)
 }
 
 func validatedMigrationSchema(schema string) (string, error) {
