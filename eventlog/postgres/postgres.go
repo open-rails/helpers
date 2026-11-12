@@ -1,6 +1,7 @@
 // Package postgres stores independent scoped logs in a host-owned PostgreSQL
 // schema. Append and SQL source triggers queue facts in the mutation transaction;
-// a deferred trigger assigns commit-safe positions after locking all its scopes.
+// a deferred trigger assigns commit-safe positions after locking all its scopes and
+// notifies NotifyChannel(schema) with "<source> <scope>" for each, delivered at commit.
 package postgres
 
 import (
@@ -19,6 +20,18 @@ import (
 
 //go:embed schema.sql
 var schemaSQL string
+
+//go:embed schema_v2.sql
+var schemaV2SQL string
+
+// versions are the schema's migrations, in order: v1 the tables and flush, v2 the flush's NOTIFY.
+var versions = []*string{&schemaSQL, &schemaV2SQL}
+
+// NotifyChannel is where a schema's log says, at commit, that a stream moved: the payload
+// is "<source> <scope>". A consumer LISTENs and reads its stream when it hears it, instead
+// of reading on a clock. Nothing replays a notification sent while no one listened, so a
+// consumer reads once after each (re)LISTEN.
+func NotifyChannel(schema string) string { return schema + ".eventlog" }
 
 func schemaName(schema string) (string, error) {
 	if schema == "" || len(schema) > 63 || strings.ContainsRune(schema, 0) {
@@ -48,15 +61,18 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, schema string) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS `+name+`.eventlog_migrations(version integer PRIMARY KEY)`); err != nil {
 		return err
 	}
-	var exists bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+name+`.eventlog_migrations WHERE version=1)`).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		if _, err = tx.Exec(ctx, strings.ReplaceAll(schemaSQL, "{{schema}}", name)); err != nil {
+	for i, sql := range versions {
+		var exists bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+name+`.eventlog_migrations WHERE version=$1)`, i+1).Scan(&exists); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO `+name+`.eventlog_migrations VALUES(1)`); err != nil {
+		if exists {
+			continue
+		}
+		if _, err = tx.Exec(ctx, strings.ReplaceAll(*sql, "{{schema}}", name)); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO `+name+`.eventlog_migrations VALUES($1)`, i+1); err != nil {
 			return err
 		}
 	}
@@ -221,14 +237,19 @@ func NewID() string { return rand.Text() }
 // a generated segment and verify it against this function in a contract test.
 // Products may add their own FK/cascade constraints after this segment. This
 // lets a single product migration install the engine, copy retained history and
-// switch its SQL capture atomically. Only version 1 is currently defined.
+// switch its SQL capture atomically. Version 1 installs the engine; version 2, applied
+// after it, makes its flush notify NotifyChannel.
 func MigrationSQL(schema string, version int) (string, error) {
-	if version != 1 {
+	if version < 1 || version > len(versions) {
 		return "", fmt.Errorf("eventlog: unknown schema version %d", version)
 	}
 	name, err := schemaName(schema)
 	if err != nil {
 		return "", err
 	}
-	return "CREATE TABLE IF NOT EXISTS " + name + ".eventlog_migrations(version integer PRIMARY KEY);\n" + strings.ReplaceAll(schemaSQL, "{{schema}}", name) + "\nINSERT INTO " + name + ".eventlog_migrations(version) VALUES(1);\n", nil
+	body := strings.ReplaceAll(*versions[version-1], "{{schema}}", name)
+	if version == 1 {
+		body = "CREATE TABLE IF NOT EXISTS " + name + ".eventlog_migrations(version integer PRIMARY KEY);\n" + body
+	}
+	return body + "\nINSERT INTO " + name + ".eventlog_migrations(version) VALUES(" + fmt.Sprint(version) + ");\n", nil
 }
