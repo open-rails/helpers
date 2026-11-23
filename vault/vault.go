@@ -299,6 +299,12 @@ func (s *Session) run(ctx context.Context) {
 		s.log.Info("vault: authenticated", "method", string(s.cfg.Method), "attempts", failures+1)
 		failures = 0
 		s.hold(ctx, secret)
+		// A lease ends within its grace period, before the token does: pace
+		// the next login so a token that cannot be renewed is not looked up
+		// in a loop.
+		if !sleep(ctx, backoff(0)) {
+			return
+		}
 	}
 }
 
