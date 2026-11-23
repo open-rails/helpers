@@ -6,6 +6,7 @@ Shared Go helpers in one module: `github.com/open-rails/helpers`. Requires Go 1.
 | --- | --- | --- |
 | `github.com/open-rails/helpers/api` | HTTP errors, responses, safe metadata and pagination | Standard library |
 | `github.com/open-rails/helpers/smtp` | Send email through any SMTP server (`smtptest`: an in-process server for end-to-end tests) | Standard library |
+| `github.com/open-rails/helpers/vault` | Keep one HashiCorp Vault client logged in: token, AppRole or Kubernetes, renewal and re-login | Vault API client |
 | `github.com/open-rails/helpers/api/gin` | Gin writers, query binding and locale helpers | API helpers and Gin |
 | `github.com/open-rails/helpers/river` | Initialize River tables and compose one host-owned client | River and pgx |
 | `github.com/open-rails/helpers/deps` | Dependency supervision, Redis client, fallback switch, probe/status/metrics handlers | go-redis |
@@ -53,6 +54,10 @@ These packages are removed from helpers in v1.11.0; there are no forwarding alia
 `smtp.New(smtp.Config{Host, Port, Username, Password, From})` returns a `Sender`, so the email provider is configuration: SendGrid is `smtp.sendgrid.net:587` with username `apikey` and an API key with `mail.send` as the password; ZeptoMail, SES or a self-hosted server are another host. Port 465 is TLS from the first byte; any other port (0 is 587) upgrades with STARTTLS when offered, and must before credentials go to a host other than loopback. Authentication is PLAIN, else LOGIN. `From` is one RFC 5322 mailbox (`"Shop <noreply@shop.example>"`); a `Message` may carry its own. `Send(ctx, Message{To, Subject, Text, HTML})` opens one connection per message (safe for concurrent use), bounded by `ctx` and `Timeout` (30s), and writes a multipart/alternative message with `Date`, `Message-ID` and encoded headers; a refusal wraps the server's `*textproto.Error`. `CheckHealth` connects, negotiates TLS and authenticates without sending. No error carries the password. Applications name the settings `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD` and `EMAIL_SMTP_FROM`.
 
 `smtptest.Start(t, smtptest.Options{...})` runs an SMTP server on 127.0.0.1 that captures and decodes what it receives (`Wait`, `Messages`), optionally requiring credentials, offering STARTTLS or speaking implicit TLS with a certificate `ClientTLS` trusts, refusing chosen recipients, and simulating an outage (`Outage`).
+
+## Vault
+
+`vault.Login(ctx, vault.Config{Address, Namespace, Method, ...})` returns a `Session` without waiting on the network; `Client()` is the one `*vaultapi.Client` to hand to libraries. `Method` is `token` (`Token`; empty `Method` with a `Token` is token), `approle` (`RoleID`, `SecretID`) or `kubernetes` (`KubernetesRole`, `KubernetesJWT`); `Mount` is the auth method's path without `auth/` (default: the method's name). `SecretID` and `KubernetesJWT` are functions called for every login, so a rotated credential is used; the package reads no environment variables (not even `VAULT_TOKEN`) and no files. The session logs in on its own goroutine with capped full-jitter backoff, renews the token while Vault allows, logs in again when renewal ends, and logs in again at once when a request through `Client()` is answered 403 and a token self-lookup is refused too (a 403 whose self-lookup succeeds is a policy denial). A static token is renewed while renewable and never reissued. `Probe` is nil only while authenticated and a self-lookup answers (register it with a `deps.Supervisor`); before the first login it returns `ErrNotAuthenticated` without a network call. `Close` stops it without revoking the token.
 
 ## River composition
 
