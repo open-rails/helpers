@@ -10,6 +10,7 @@ package vault
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -56,8 +57,13 @@ type Config struct {
 	// Mount is the auth method's mount (the -path of `vault auth enable`,
 	// without auth/); empty is the method's name.
 	Mount string
-	// TLS configures the client's TLS (a private CA); nil uses the system
-	// roots.
+	// CACert is the PEM bundle of the CA that signed Vault's certificate,
+	// as VAULT_CACERT names it. Set, it is the only trust: the system roots
+	// are not consulted, as with Vault's own client, so a certificate a
+	// public CA issued for Vault's name is refused.
+	CACert []byte
+	// TLS configures the client's TLS; CACert replaces its RootCAs. Nil
+	// uses the system roots.
 	TLS *tls.Config
 	// Timeout bounds one request; 0 is DefaultTimeout.
 	Timeout time.Duration
@@ -115,7 +121,10 @@ func Login(ctx context.Context, cfg Config) (*Session, error) {
 	if cfg.Method != MethodToken {
 		s.loginPath = "auth/" + cfg.Mount + "/login"
 	}
-	base := transport(cfg.TLS)
+	base, err := transport(cfg.TLS, cfg.CACert)
+	if err != nil {
+		return nil, err
+	}
 	if s.client, err = newClient(cfg, &observer{next: base, check: s.check, login: s.loginPath}); err != nil {
 		return nil, err
 	}
@@ -198,7 +207,7 @@ func normalize(cfg Config) (Config, error) {
 	return cfg, nil
 }
 
-func transport(tlsConfig *tls.Config) http.RoundTripper {
+func transport(tlsConfig *tls.Config, caCert []byte) (http.RoundTripper, error) {
 	t := &http.Transport{}
 	if d, ok := http.DefaultTransport.(*http.Transport); ok {
 		t = d.Clone()
@@ -208,7 +217,14 @@ func transport(tlsConfig *tls.Config) http.RoundTripper {
 	} else {
 		t.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	}
-	return t
+	if len(caCert) > 0 {
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(caCert) {
+			return nil, errors.New("vault: CACert holds no PEM certificate")
+		}
+		t.TLSClientConfig.RootCAs = roots
+	}
+	return t, nil
 }
 
 func newClient(cfg Config, rt http.RoundTripper) (*vaultapi.Client, error) {

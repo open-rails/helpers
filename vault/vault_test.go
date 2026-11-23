@@ -2,9 +2,16 @@ package vault
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -341,4 +348,48 @@ func TestConfigErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCACertIsTheTrustForATLSVault(t *testing.T) {
+	f := &fakeVault{live: map[string]bool{"static": true}, lease: 3600, renewLease: 3600, renewable: true}
+	f.srv = httptest.NewTLSServer(http.HandlerFunc(f.serve))
+	t.Cleanup(f.srv.Close)
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: f.srv.Certificate().Raw})
+
+	s := login(t, Config{Address: f.srv.URL, Token: "static", CACert: ca})
+	eventually(t, "lookup over TLS", authenticated(s))
+	if err := s.Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	for name, cfg := range map[string]Config{
+		"system roots": {Address: f.srv.URL, Token: "static"},
+		"another CA":   {Address: f.srv.URL, Token: "static", CACert: selfSignedCA(t)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			untrusted := login(t, cfg)
+			eventually(t, "the certificate refused", func() bool {
+				err := untrusted.state()
+				return err != nil && strings.Contains(err.Error(), "certificate")
+			})
+		})
+	}
+	if _, err := Login(context.Background(), Config{Address: f.srv.URL, Token: "static", CACert: []byte("not a certificate")}); err == nil {
+		t.Fatal("a CACert with no PEM certificate was accepted")
+	}
+}
+
+// selfSignedCA is the PEM of a CA that signed nothing the fake serves.
+func selfSignedCA(t *testing.T) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "other CA"}, IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
