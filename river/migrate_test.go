@@ -11,20 +11,20 @@ import (
 )
 
 func TestApplyMigrationsRejectsInvalidInputsBeforeConnecting(t *testing.T) {
-	if err := ApplyMigrations(nil, nil, ""); err == nil {
+	if err := ApplyMigrations(nil, nil, MigrationOptions{}); err == nil {
 		t.Fatal("nil context accepted")
 	}
-	if err := ApplyMigrations(t.Context(), nil, ""); err == nil {
+	if err := ApplyMigrations(t.Context(), nil, MigrationOptions{}); err == nil {
 		t.Fatal("nil host pool accepted")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := ApplyMigrations(ctx, nil, ""); !errors.Is(err, context.Canceled) {
+	if err := ApplyMigrations(ctx, nil, MigrationOptions{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled context: %v", err)
 	}
 	// An uninitialized pool proves invalid schema names cannot reach a connection.
 	for _, schema := range []string{" ", "a.b", "quoted\"schema", "1schema", "bad\x00name", strings.Repeat("a", 47)} {
-		if err := ApplyMigrations(t.Context(), &pgxpool.Pool{}, schema); err == nil {
+		if err := ApplyMigrations(t.Context(), &pgxpool.Pool{}, MigrationOptions{Schema: schema}); err == nil {
 			t.Errorf("invalid schema accepted: %q", schema)
 		}
 	}
@@ -33,7 +33,7 @@ func TestApplyMigrationsRejectsInvalidInputsBeforeConnecting(t *testing.T) {
 func TestMigrationAndCompositionRejectWhitespaceSchemas(t *testing.T) {
 	pool := lazyPool(t)
 	for _, schema := range []string{" ", "\t", " public ", "public\n"} {
-		if err := ApplyMigrations(t.Context(), pool, schema); err == nil {
+		if err := ApplyMigrations(t.Context(), pool, MigrationOptions{Schema: schema}); err == nil {
 			t.Fatalf("migration silently normalized %q", schema)
 		}
 		if _, err := New(t.Context(), pool, &riverqueue.Config{Schema: schema}, NewContribution("whitespace", firstRegistration, nil, nil)); err == nil {
