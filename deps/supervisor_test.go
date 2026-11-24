@@ -1,8 +1,11 @@
 package deps
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,6 +20,24 @@ func TestBackoffIsCappedFullJitter(t *testing.T) {
 				t.Fatalf("attempt %d: %v outside [0,%v]", attempt, d, ceil)
 			}
 		}
+	}
+}
+
+func TestRetryLogsThroughWithLogger(t *testing.T) {
+	var logs bytes.Buffer
+	for _, l := range []*slog.Logger{slog.New(slog.NewTextHandler(&logs, nil)), nil} { // nil: slog.Default(), not a nil dereference
+		tries := 0
+		if err := New(WithTiming(fastTiming), WithLogger(l)).Retry(t.Context(), "pg", func(context.Context) error {
+			if tries++; tries == 1 {
+				return errors.New("refused")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.Contains(logs.String(), "dependency=pg") {
+		t.Fatalf("retry did not log through WithLogger: %q", logs.String())
 	}
 }
 

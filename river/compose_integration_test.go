@@ -61,7 +61,7 @@ func TestOneFleetPersistsBeforeStartAndPreservesHostPool(t *testing.T) {
 	if firstProducer != client || secondProducer != client || client.Stopped() != nil {
 		t.Fatal("composition did not return the one unstarted bound client")
 	}
-	if err := ApplyMigrations(ctx, pool, schema); err != nil {
+	if err := ApplyMigrations(ctx, pool, MigrationOptions{Schema: schema}); err != nil {
 		t.Fatal(err)
 	}
 	events, unsubscribe := client.Subscribe(riverqueue.EventKindJobCompleted)

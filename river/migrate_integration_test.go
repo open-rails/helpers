@@ -32,7 +32,7 @@ func TestApplyMigrationsConcurrentOneConnectionPool(t *testing.T) {
 					if selected == "" && i%2 == 0 {
 						selected = "public"
 					}
-					results <- ApplyMigrations(ctx, pool, selected)
+					results <- ApplyMigrations(ctx, pool, MigrationOptions{Schema: selected})
 				}()
 			}
 			close(start)
@@ -41,7 +41,7 @@ func TestApplyMigrationsConcurrentOneConnectionPool(t *testing.T) {
 					t.Fatal("concurrent migration on one-slot pool:", err)
 				}
 			}
-			if err := ApplyMigrations(ctx, pool, schema); err != nil {
+			if err := ApplyMigrations(ctx, pool, MigrationOptions{Schema: schema}); err != nil {
 				t.Fatal("idempotent migration:", err)
 			}
 			client, err := New(ctx, pool, &riverqueue.Config{Schema: schema}, NewContribution("migration-proof", firstRegistration, nil, nil))
@@ -85,7 +85,7 @@ func TestApplyMigrationsLocksBeforeSchemaCreationAndCancels(t *testing.T) {
 	}
 	waiting, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
-	go func() { done <- ApplyMigrations(waiting, pool, schema) }()
+	go func() { done <- ApplyMigrations(waiting, pool, MigrationOptions{Schema: schema}) }()
 	for {
 		var blocked bool
 		if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND classid=hashtext(current_database())::oid AND objid=hashtext($1)::oid)`, key).Scan(&blocked); err != nil {
@@ -120,7 +120,7 @@ func TestApplyMigrationsLocksBeforeSchemaCreationAndCancels(t *testing.T) {
 	if _, err := blocker.Exec(ctx, "SELECT pg_advisory_unlock(hashtext(current_database()),hashtext($1))", key); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyMigrations(ctx, pool, schema); err != nil {
+	if err := ApplyMigrations(ctx, pool, MigrationOptions{Schema: schema}); err != nil {
 		t.Fatal("canceled migration prevented a subsequent initializer:", err)
 	}
 }

@@ -36,6 +36,7 @@ type Options struct {
 	FailureBackoff time.Duration // minimum gap between failed loads of one key (5s)
 	MaxEntries     int           // bound on cached keys (10_000)
 	Clock          Clock         // nil = real time; for tests
+	Logger         *slog.Logger  // failed background reloads; nil is slog.Default(), read in New
 }
 
 // Cache is safe for concurrent use.
@@ -62,6 +63,7 @@ func New[K comparable, V any](o Options, load Load[K, V]) (*Cache[K, V], error) 
 	o.LoadTimeout = cmp.Or(o.LoadTimeout, 10*time.Second)
 	o.FailureBackoff = cmp.Or(o.FailureBackoff, 5*time.Second)
 	o.MaxEntries = cmp.Or(o.MaxEntries, 10_000)
+	o.Logger = cmp.Or(o.Logger, slog.Default())
 	var clk otter.Clock
 	if o.Clock != nil {
 		clk = clock{o.Clock}
@@ -73,7 +75,7 @@ func New[K comparable, V any](o Options, load Load[K, V]) (*Cache[K, V], error) 
 		ExpiryCalculator:  otter.ExpiryWriting[K, V](o.MaxStale),
 		RefreshCalculator: backoff[K, V]{otter.RefreshWriting[K, V](o.RefreshAfter), o.FailureBackoff},
 		Clock:             clk,
-		Logger:            logger{o.Name},
+		Logger:            logger{o.Logger, o.Name},
 	}); err != nil {
 		return nil, fmt.Errorf("cache %q: %w", o.Name, err)
 	}
@@ -81,7 +83,7 @@ func New[K comparable, V any](o Options, load Load[K, V]) (*Cache[K, V], error) 
 		MaximumSize:      o.MaxEntries,
 		ExpiryCalculator: otter.ExpiryWriting[K, error](o.FailureBackoff),
 		Clock:            clk,
-		Logger:           logger{o.Name},
+		Logger:           logger{o.Logger, o.Name},
 	}); err != nil {
 		c.c.StopAllGoroutines()
 		return nil, fmt.Errorf("cache %q: %w", o.Name, err)
@@ -261,14 +263,17 @@ func (c clock) NowNano() int64                      { return c.Now().UnixNano() 
 func (clock) Tick(d time.Duration) <-chan time.Time { return time.Tick(d) }
 
 // logger reports failed background reloads, which no caller sees.
-type logger struct{ name string }
+type logger struct {
+	l    *slog.Logger
+	name string
+}
 
 func (l logger) Warn(ctx context.Context, msg string, err error) {
-	slog.WarnContext(ctx, "cache: "+msg, "cache", l.name, "err", err)
+	l.l.WarnContext(ctx, "cache: "+msg, "cache", l.name, "err", err)
 }
 
 func (l logger) Error(ctx context.Context, msg string, err error) {
-	slog.ErrorContext(ctx, "cache: "+msg, "cache", l.name, "err", err)
+	l.l.ErrorContext(ctx, "cache: "+msg, "cache", l.name, "err", err)
 }
 
 // Stats are cumulative counts for one cache Name. Hits include StaleServes

@@ -35,10 +35,10 @@ func TestNotifyEveryInsertStartsJobsInsideTheNotifyWindow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 	const schema = "river_burst"
-	if err := ApplyMigrations(ctx, pool, schema); err != nil {
+	if err := ApplyMigrations(ctx, pool, MigrationOptions{Schema: schema}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyMigrations(ctx, pool, schema); err != nil {
+	if err := ApplyMigrations(ctx, pool, MigrationOptions{Schema: schema}); err != nil {
 		t.Fatal("idempotent install:", err)
 	}
 	started := make(chan burstStart, 8)

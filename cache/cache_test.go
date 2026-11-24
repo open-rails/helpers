@@ -310,14 +310,10 @@ func TestStaleWhileRevalidate(t *testing.T) {
 
 func TestFailedReloadServesStaleWithBackoffUntilMaxStale(t *testing.T) {
 	logs := &syncBuffer{}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
 	down := errors.New("upstream down")
 	src := newSource(map[string]string{"k": "v1"})
 	clk := newClock()
-	c := newCache(t, src, clk)
+	c := newCache(t, src, clk, func(o *Options) { o.Logger = slog.New(slog.NewTextHandler(logs, nil)) })
 	get(t, c, "k")
 
 	src.set(func(s *source) { s.err = down })

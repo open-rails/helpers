@@ -47,7 +47,7 @@ func TestPeriodicRestartAndParallelInstances(t *testing.T) {
 	defer func() {
 		_, _ = pool.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
 	}()
-	if err := ApplyMigrations(ctx, pool, schema); err != nil {
+	if err := ApplyMigrations(ctx, pool, MigrationOptions{Schema: schema}); err != nil {
 		t.Fatal(err)
 	}
 	var runs atomic.Int64
@@ -151,7 +151,7 @@ func TestPeriodicCheckpointOverdueAndRetainedRecords(t *testing.T) {
 	defer func() {
 		_, _ = pool.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
 	}()
-	if err := ApplyMigrations(ctx, pool, schema); err != nil {
+	if err := ApplyMigrations(ctx, pool, MigrationOptions{Schema: schema}); err != nil {
 		t.Fatal(err)
 	}
 	// Exercise the actual SQL checkpoint with existing job metadata, including
