@@ -6,6 +6,7 @@
 package deps
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -99,14 +100,17 @@ type Supervisor struct {
 // Option configures a Supervisor.
 type Option func(*Supervisor)
 
-func WithTiming(t Timing) Option       { return func(s *Supervisor) { s.timing = t } }
+func WithTiming(t Timing) Option { return func(s *Supervisor) { s.timing = t } }
+
+// WithLogger sets the supervisor's logger; nil is slog.Default(), read in New.
 func WithLogger(l *slog.Logger) Option { return func(s *Supervisor) { s.log = l } }
 
 func New(opts ...Option) *Supervisor {
-	s := &Supervisor{log: slog.Default()}
+	s := &Supervisor{}
 	for _, o := range opts {
 		o(s)
 	}
+	s.log = cmp.Or(s.log, slog.Default())
 	s.timing = s.timing.withDefaults()
 	return s
 }
