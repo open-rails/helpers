@@ -134,7 +134,7 @@ func (c *Cache[K, V]) Get(ctx context.Context, keys []K) (map[K]V, error) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		m, err := c.c.BulkGet(context.WithoutCancel(ctx), load, otter.BulkLoaderFunc[K, V](c.bulkLoad))
+		m, err := c.c.BulkGet(context.WithoutCancel(ctx), load, otter.BulkLoaderFunc[K, V](c.getLoad))
 		done <- result{m, err}
 	}()
 	select {
@@ -202,6 +202,21 @@ func (c *Cache[K, V]) InvalidateAll() {
 func (c *Cache[K, V]) Close() {
 	c.c.StopAllGoroutines()
 	c.fails.StopAllGoroutines()
+}
+
+// getLoad is Get's loader. A failure recorded after Get checked for one (a
+// concurrent load failing in between) is returned again without loading, and
+// without extending its backoff.
+func (c *Cache[K, V]) getLoad(ctx context.Context, keys []K) (map[K]V, error) {
+	var errs []error
+	for _, k := range keys {
+		err, failed := c.fails.GetIfPresent(k)
+		if !failed {
+			return c.bulkLoad(ctx, keys)
+		}
+		errs = appendErr(errs, err)
+	}
+	return nil, join(errs)
 }
 
 func (c *Cache[K, V]) bulkLoad(ctx context.Context, keys []K) (m map[K]V, err error) {

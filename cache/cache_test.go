@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/maypok86/otter/v2"
 )
 
 type fakeClock struct{ n atomic.Int64 }
@@ -382,6 +384,27 @@ func TestFailedLoadOfAbsentKeyBacksOff(t *testing.T) {
 	c.Invalidate("k")
 	src.set(func(s *source) { s.err = nil })
 	wantMap(t, get(t, c, "k"), map[string]string{"k": "v"}) // Invalidate clears the failure
+}
+
+// A Get that checked for a failure before a concurrent load failed reaches the
+// loader after it: the recorded failure answers, as inside FailureBackoff.
+func TestLoadAfterARacingFailureBacksOff(t *testing.T) {
+	down := errors.New("upstream down")
+	src := newSource(map[string]string{"k": "v"})
+	src.err = down
+	c := newCache(t, src, newClock())
+	_, first := c.Get(context.Background(), []string{"k"})
+	if !errors.Is(first, down) {
+		t.Fatalf("got %v", first)
+	}
+	// What Get runs once its check has passed.
+	_, err := c.c.BulkGet(context.Background(), []string{"k"}, otter.BulkLoaderFunc[string, string](c.getLoad))
+	if !errors.Is(err, down) {
+		t.Fatalf("racing load got %v, want the recorded failure", err)
+	}
+	if n := len(src.loads()); n != 1 {
+		t.Fatalf("%d loads, want 1", n)
+	}
 }
 
 func TestRefreshFailureKeepsTheCachedValue(t *testing.T) {
