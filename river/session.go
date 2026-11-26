@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -142,7 +143,14 @@ func (l *sessionListener) Unlisten(ctx context.Context, topic string) error {
 	return err
 }
 
+// pingTimeout bounds River's listener ping, which carries no deadline: a link
+// that stalls without a reset would hang the notifier until TCP gives up. A
+// failed ping closes the connection and River redials it.
+const pingTimeout = 5 * time.Second
+
 func (l *sessionListener) Ping(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
+	defer cancel()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.conn.Ping(ctx)
