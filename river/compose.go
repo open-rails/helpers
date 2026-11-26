@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	riverqueue "github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 )
 
 // Binding is the final client and the exact pool used to construct it. Both are
@@ -77,7 +76,11 @@ func flatten(jobs []Contribution) []Contribution {
 // discard the participating library runtimes and construct fresh ones.
 // The input config's maps and slices are copied. An existing Workers registry
 // may be extended during registration and must also be discarded on failure.
-func New(ctx context.Context, pool *pgxpool.Pool, options *riverqueue.Config, jobs ...Contribution) (client *riverqueue.Client[pgx.Tx], err error) {
+func New(ctx context.Context, pool *pgxpool.Pool, options *riverqueue.Config, jobs ...Contribution) (*riverqueue.Client[pgx.Tx], error) {
+	return compose(ctx, pool, nil, options, jobs)
+}
+
+func compose(ctx context.Context, pool *pgxpool.Pool, session *pgxpool.Config, options *riverqueue.Config, jobs []Contribution) (client *riverqueue.Client[pgx.Tx], err error) {
 	if ctx == nil {
 		return nil, errors.New("riverkit: context is required")
 	}
@@ -86,6 +89,11 @@ func New(ctx context.Context, pool *pgxpool.Pool, options *riverqueue.Config, jo
 	}
 	if pool == nil {
 		return nil, errors.New("riverkit: host pool is required")
+	}
+	if session != nil {
+		if err := checkPooled(pool); err != nil {
+			return nil, err
+		}
 	}
 	jobs = flatten(jobs)
 	if len(jobs) == 0 {
@@ -193,7 +201,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, options *riverqueue.Config, jo
 	}
 	periodic := cfg.PeriodicJobs
 	cfg.PeriodicJobs = nil
-	client, err = riverqueue.NewClient(riverpgxv5.New(pool), &cfg)
+	client, err = riverqueue.NewClient(Driver(pool, session), &cfg)
 	if err != nil {
 		return nil, fmt.Errorf("riverkit: construct client: %w", err)
 	}
