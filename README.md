@@ -74,6 +74,8 @@ failed-job retries are not throttled. Cron schedules use River's native schedule
 
 `river.New` combines library contributions, validates registration and binds their producers to the same ordinary River client and actual host pool. Pass the same schema in `riverqueue.Config.Schema`; empty also means `public`. Construction does not migrate or start workers. The host starts/stops that client and retains ownership of the pool. These helpers add neither a scheduler nor billing logic.
 
+Behind a transaction pooler (PgBouncer in transaction mode) River's `LISTEN` loses its notifications. `river.NewWithSession(ctx, pool, session, cfg, jobs...)` is `New` with the client working through `pool` and listening on a connection it dials from `session`, a direct `*pgxpool.Config` of the same database; nil `session` is `New`. `pool` then needs `DefaultQueryExecMode` `cache_describe`, `exec` or `simple_protocol`, else it is refused. The job table stays the truth: producers still poll every `FetchPollInterval`, and River pings and redials the listener, so a lost notification only delays a job. `river.Driver(pool, session)` is the same driver for a client built directly. Run `ApplyMigrations` on a direct pool: its lock is a session lock.
+
 When importing both the helpers and upstream River, use a descriptive alias such as `riverhelpers` for `github.com/open-rails/helpers/river`.
 
 ## Dependency supervision
